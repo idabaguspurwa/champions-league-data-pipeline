@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: champions-league
+bases:
+  - ../../base
+images:
+  - name: champions-league/data-ingestion
+    newTag: placeholder
+  - name: champions-league/data-quality
+    newTag: placeholder
+  - name: champions-league/data-transformation
+    newTag: placeholder
+  - name: champions-league/data-export
+    newTag: placeholder

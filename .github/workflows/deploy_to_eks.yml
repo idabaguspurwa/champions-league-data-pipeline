@@ -1,4 +1,4 @@
-name: Deploy to EKS
+name: Build, Scan, and Deploy to EKS
 
 on:
   push:
@@ -21,199 +21,162 @@ env:
   EKS_CLUSTER_NAME: champions-league-cluster
   NAMESPACE: champions-league
 
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+
 jobs:
+  ## -----------------------------------------------------------------
+  ## 1. Run Linters and Tests
+  ## -----------------------------------------------------------------
   test:
+    name: "🧪 Test and Analyze"
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: "Checkout code"
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
+      - name: "Set up Python"
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov flake8 black mypy
+      - name: "Cache Pip dependencies"
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
 
-    - name: Run code quality checks
-      run: |
-        # Format check
-        black --check src/
-        
-        # Lint check
-        flake8 src/ --max-line-length=100 --ignore=E203,W503
-        
-        # Type check
-        mypy src/ --ignore-missing-imports
+      - name: "Install dependencies"
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 black mypy
 
-    - name: Run unit tests
-      run: |
-        pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
-        
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
+      - name: "Run linters and type checking"
+        run: |
+          black --check src/
+          flake8 src/
+          mypy src/ --ignore-missing-imports
 
-  build-and-push:
+      - name: "Run unit tests and generate coverage"
+        run: pytest tests/ --cov=src --cov-report=xml
+
+      - name: "Upload coverage to Codecov"
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+
+  ## -----------------------------------------------------------------
+  ## 2. Build, Push, and Scan Images
+  ## -----------------------------------------------------------------
+  build-and-scan:
+    name: "📦 Build & Scan Services"
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       matrix:
         service: [ingestion, data-quality, transformation, export]
-        
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: "Checkout code"
+        uses: actions/checkout@v4
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: "Configure AWS credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: "Login to Amazon ECR"
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build, tag, and push image to Amazon ECR
-      id: build-image
-      env:
-        ECR_REPOSITORY: champions-league/data-${{ matrix.service }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        # Build a docker container and push it to ECR
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f docker/Dockerfile-${{ matrix.service }} .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: "Build, tag, and push image to ECR"
+        id: build-image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          ECR_REPOSITORY: champions-league/data-${{ matrix.service }}
+        run: |
+          docker build -t ${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG -f docker/Dockerfile-${{ matrix.service }} .
+          docker push ${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "image_uri=${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
-    - name: Update kustomization with new image
-      run: |
-        # Update the image in kubernetes manifests
-        sed -i "s|image: champions-league/data-${{ matrix.service }}:.*|image: $ECR_REGISTRY/champions-league/data-${{ matrix.service }}:${{ github.sha }}|" kubernetes/deployments/data-${{ matrix.service }}-deployment.yaml
+      - name: "Run Trivy vulnerability scanner"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.build-image.outputs.image_uri }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
 
-    - name: Commit updated manifests
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add kubernetes/deployments/data-${{ matrix.service }}-deployment.yaml
-        git diff --staged --quiet || git commit -m "Update ${{ matrix.service }} image to ${{ github.sha }}"
+      - name: "Upload Trivy scan results"
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
 
+  ## -----------------------------------------------------------------
+  ## 3. Deploy All Services to EKS
+  ## -----------------------------------------------------------------
   deploy:
-    needs: build-and-push
+    name: "🚀 Deploy to EKS"
+    needs: build-and-scan
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: "Checkout code"
+        uses: actions/checkout@v4
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: "Configure AWS credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Install kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'v1.28.0'
+      - name: "Install kubectl and kustomize"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kubectl
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
 
-    - name: Update kubeconfig
-      run: |
-        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+      - name: "Update kubeconfig"
+        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
-    - name: Create namespace if not exists
-      run: |
-        kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+      - name: "Update Kustomize manifests with new image tags"
+        run: |
+          cd kubernetes/overlays/production
+          kustomize edit set image champions-league/data-ingestion=${{ env.ECR_REGISTRY }}/champions-league/data-ingestion:${{ github.sha }}
+          kustomize edit set image champions-league/data-quality=${{ env.ECR_REGISTRY }}/champions-league/data-quality:${{ github.sha }}
+          kustomize edit set image champions-league/data-transformation=${{ env.ECR_REGISTRY }}/champions-league/data-transformation:${{ github.sha }}
+          kustomize edit set image champions-league/data-export=${{ env.ECR_REGISTRY }}/champions-league/data-export:${{ github.sha }}
+          cat kustomization.yaml
 
-    - name: Deploy to EKS
-      run: |
-        # Apply ConfigMaps first
-        kubectl apply -f kubernetes/configmaps/ -n ${{ env.NAMESPACE }}
-        
-        # Apply Services
-        kubectl apply -f kubernetes/services/ -n ${{ env.NAMESPACE }}
-        
-        # Apply Deployments
-        kubectl apply -f kubernetes/deployments/ -n ${{ env.NAMESPACE }}
-        
-        # Apply Jobs
-        kubectl apply -f kubernetes/jobs/ -n ${{ env.NAMESPACE }}
+      - name: "Deploy to EKS using Kustomize"
+        run: |
+          kustomize build kubernetes/overlays/production | kubectl apply -f -
+          echo "Waiting for changes to apply..."
+          sleep 10
 
-    - name: Wait for deployment rollout
-      run: |
-        kubectl rollout status deployment/data-ingestion-service -n ${{ env.NAMESPACE }} --timeout=300s
-        kubectl rollout status deployment/data-quality-service -n ${{ env.NAMESPACE }} --timeout=300s
+      - name: "Verify deployments"
+        run: kubectl rollout status deployment --all -n ${{ env.NAMESPACE }} --timeout=5m
 
-    - name: Run deployment tests
-      run: |
-        # Test service endpoints
-        kubectl run test-pod --image=curlimages/curl:latest --rm -it --restart=Never -n ${{ env.NAMESPACE }} -- \
-          curl -f http://data-ingestion-service/health || exit 1
-        
-        kubectl run test-pod --image=curlimages/curl:latest --rm -it --restart=Never -n ${{ env.NAMESPACE }} -- \
-          curl -f http://data-quality-service/health || exit 1
+      - name: "Run deployment smoke tests"
+        run: |
+          for service in ingestion data-quality transformation export; do
+            echo "Testing health of data-$service..."
+            kubectl run smoke-test-$service --image=curlimages/curl:latest -n ${{ env.NAMESPACE }} --rm -i --restart=Never -- \
+              curl -f --max-time 10 http://data-$service/health || (echo "Health check for data-$service failed!" && exit 1)
+          done
 
-    - name: Notify deployment status
-      if: always()
-      run: |
-        if [ ${{ job.status }} == 'success' ]; then
-          aws sns publish --topic-arn ${{ secrets.SNS_TOPIC_ARN }} \
-            --subject "EKS Deployment Success" \
-            --message "Champions League services deployed successfully to EKS cluster ${{ env.EKS_CLUSTER_NAME }}"
-        else
-          aws sns publish --topic-arn ${{ secrets.SNS_TOPIC_ARN }} \
-            --subject "EKS Deployment Failed" \
-            --message "Champions League services deployment failed. Check GitHub Actions logs for details."
-        fi
-
-  security-scan:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Scan ECR images
-      run: |
-        for service in ingestion data-quality transformation export; do
-          echo "Scanning champions-league/data-$service..."
-          aws ecr describe-image-scan-findings \
-            --repository-name champions-league/data-$service \
-            --image-id imageTag=${{ github.sha }} \
-            --region ${{ env.AWS_REGION }} || echo "Scan not available yet"
-        done
-
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: '${{ env.ECR_REGISTRY }}/champions-league/data-ingestion:${{ github.sha }}'
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-
-    - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v2
-      with:
-        sarif_file: 'trivy-results.sarif'
+      - name: "Send Deployment Notification"
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            SUBJECT="✅ Success: EKS Deployment"
+            MESSAGE="Services deployed to EKS cluster '${{ env.EKS_CLUSTER_NAME }}'. Commit: ${{ github.sha }}"
+          else
+            SUBJECT="❌ Failure: EKS Deployment"
+            MESSAGE="EKS deployment failed. Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+          aws sns publish --topic-arn "${{ secrets.SNS_TOPIC_ARN }}" --subject "$SUBJECT" --message "$MESSAGE"

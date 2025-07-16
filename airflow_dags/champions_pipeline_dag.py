@@ -97,7 +97,6 @@ def champions_league_pipeline():
             endpoint='/health', timeout=30, poke_interval=10, mode='poke'
         )
         
-        # Dynamically create ingestion tasks from the config list
         ingestion_tasks = []
         for config in INGESTION_CONFIGS:
             task = SimpleHttpOperator(
@@ -116,7 +115,6 @@ def champions_league_pipeline():
             endpoint='/health', timeout=30, poke_interval=10, mode='poke'
         )
 
-        # Dynamically create validation tasks
         validation_tasks = []
         for config in VALIDATION_CONFIGS:
             task = SimpleHttpOperator(
@@ -165,34 +163,28 @@ def champions_league_pipeline():
         
         check_export_health >> [export_for_tableau, export_to_excel]
 
-    @task(task_id="load_to_redshift")
-    def warehouse_task():
-        """Creates and runs a K8s Pod Operator to load data into Redshift."""
-        # Note: This is a simplified way to wrap a K8s Pod Operator in the TaskFlow API.
-        # It allows it to be chained with other @task-decorated functions easily.
-        load_op = create_kubernetes_pod_operator(
-            task_id='load_to_redshift_pod', image='champions-league/data-warehouse:latest',
-            command=['python'], arguments=['load_to_redshift.py'],
-            env_vars={
-                'INPUT_PATH': f's3a://{S3_BUCKET}/gold/',
-                'REDSHIFT_CLUSTER': Variable.get('redshift_cluster'),
-                'REDSHIFT_DATABASE': Variable.get('redshift_database'),
-                'REDSHIFT_USER': Variable.get('redshift_user')
-            },
-            resources={'request_memory': '1Gi', 'limit_memory': '2Gi', 'request_cpu': '500m', 'limit_cpu': '1000m'}
-        )
-        # In a real scenario, you'd execute this operator. For DAG structure, this is illustrative.
-        # This approach is advanced; for simplicity, keeping it as a separate task outside a group is fine.
-        return load_op
-    
-    # TaskFlow API for Python tasks - much cleaner than PythonOperator
-    @task.kubernetes(
-        image="apache/airflow:2.9.2-python3.9", # Use an image with boto3 or add it to a custom image
-        name="sns-notification-pod", is_delete_operator_pod=True,
-        trigger_rule='all_done' # Run regardless of upstream task status
+    load_to_redshift = create_kubernetes_pod_operator(
+        task_id='load_to_redshift_pod', 
+        image='champions-league/data-warehouse:latest',
+        command=['python'], 
+        arguments=['load_to_redshift.py'],
+        env_vars={
+            'INPUT_PATH': f's3a://{S3_BUCKET}/gold/',
+            'REDSHIFT_CLUSTER': Variable.get('redshift_cluster'),
+            'REDSHIFT_DATABASE': Variable.get('redshift_database'),
+            'REDSHIFT_USER': Variable.get('redshift_user')
+        },
+        resources={'request_memory': '1Gi', 'limit_memory': '2Gi', 'request_cpu': '500m', 'limit_cpu': '1000m'}
     )
+    
+    @task.kubernetes(
+        image="apache/airflow:2.9.2-python3.9",
+        name="sns-notification-pod", 
+        is_delete_operator_pod=True,
+        trigger_rule='all_done'
+    )
+    
     def pipeline_notification(dag_run=None):
-        """Send notification about pipeline completion."""
         import boto3
         
         sns_client = boto3.client('sns', region_name=AWS_REGION)
@@ -208,7 +200,6 @@ def champions_league_pipeline():
         )
         return subject
 
-    # Define task dependencies
-    ingestion_group() >> quality_group() >> transformation_group() >> [export_group(), warehouse_task()] >> pipeline_notification()
+    ingestion_group() >> quality_group() >> transformation_group() >> [export_group(), load_to_redshift] >> pipeline_notification()
 
 champions_league_pipeline()
