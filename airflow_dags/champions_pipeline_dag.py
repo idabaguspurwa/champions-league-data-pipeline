@@ -68,7 +68,7 @@ def create_kubernetes_pod_operator(
 
 @dag(
     dag_id='champions_league_pipeline_v2',
-    start_date=pendulum.now(tz="Asia/Jakarta").subtract(days=1),
+    start_date=pendulum.datetime(2025, 7, 16, tz="Asia/Jakarta"),
     schedule='0 */6 * * *',  # Every 6 hours
     catchup=False,
     max_active_runs=1,

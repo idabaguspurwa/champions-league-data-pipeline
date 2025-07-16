@@ -20,6 +20,7 @@ redshift-connector==2.0.915
 # AWS services
 awswrangler==3.5.0
 s3fs==2023.10.0
+aiobotocore==2.11.2
 
 # Data quality
 jsonschema==4.19.2
