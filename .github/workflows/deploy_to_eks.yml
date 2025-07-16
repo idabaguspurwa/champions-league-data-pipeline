@@ -31,7 +31,7 @@ jobs:
   ## 1. Run Linters and Tests
   ## -----------------------------------------------------------------
   test:
-    name: "🧪 Test and Analyze"
+    name: "Test and Analyze"
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout code"
