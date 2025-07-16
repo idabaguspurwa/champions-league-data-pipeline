@@ -1,0 +1,123 @@
+[
+  {
+    "endpoint": "Standings",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 147493,
+    "response_time": 4.744412,
+    "sample_keys": [
+      "uid",
+      "id",
+      "name",
+      "abbreviation",
+      "children",
+      "seasons"
+    ]
+  },
+  {
+    "endpoint": "Team Info",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 3339,
+    "response_time": 1.653302,
+    "sample_keys": [
+      "id",
+      "uid",
+      "slug",
+      "location",
+      "name",
+      "abbreviation",
+      "displayName",
+      "shortDisplayName",
+      "color",
+      "alternateColor",
+      "isActive",
+      "logos",
+      "record",
+      "groups",
+      "links",
+      "defaultLeague",
+      "nextEvent"
+    ]
+  },
+  {
+    "endpoint": "Team Performance",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 54205,
+    "response_time": 1.106354,
+    "sample_keys": [
+      "status",
+      "results",
+      "league",
+      "currentSeason",
+      "team"
+    ]
+  },
+  {
+    "endpoint": "Team Results",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 57195,
+    "response_time": 1.079431,
+    "sample_keys": [
+      "status",
+      "requestedSeason",
+      "events",
+      "team",
+      "currentSeason"
+    ]
+  },
+  {
+    "endpoint": "Athlete Statistics",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 15819,
+    "response_time": 0.9165,
+    "sample_keys": [
+      "id",
+      "name",
+      "abbreviation",
+      "type",
+      "categories"
+    ]
+  },
+  {
+    "endpoint": "Athlete Bio",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 2615,
+    "response_time": 0.741981,
+    "sample_keys": [
+      "awards",
+      "teamHistory"
+    ]
+  },
+  {
+    "endpoint": "Athlete Season Stats",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 227,
+    "response_time": 0.888435,
+    "sample_keys": [
+      "count",
+      "pageIndex",
+      "pageSize",
+      "pageCount",
+      "availableSeasons"
+    ]
+  },
+  {
+    "endpoint": "Athlete Overview",
+    "status": "SUCCESS",
+    "status_code": 200,
+    "data_size": 118134,
+    "response_time": 1.277129,
+    "sample_keys": [
+      "statistics",
+      "news",
+      "nextGame",
+      "gameLog"
+    ]
+  }
+]

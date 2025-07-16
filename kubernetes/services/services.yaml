@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-ingestion-service
+  namespace: champions-league
+  labels:
+    app: data-ingestion-service
+spec:
+  selector:
+    app: data-ingestion-service
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-quality-service
+  namespace: champions-league
+  labels:
+    app: data-quality-service
+spec:
+  selector:
+    app: data-quality-service
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-export-service
+  namespace: champions-league
+  labels:
+    app: data-export-service
+spec:
+  selector:
+    app: data-export-service
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP

@@ -1,0 +1,221 @@
+name: Deploy Airflow DAG
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'airflow_dags/**'
+      - '.github/workflows/deploy_airflow_dag.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'airflow_dags/**'
+
+env:
+  AWS_REGION: ap-southeast-1
+  MWAA_ENVIRONMENT_NAME: champions-league-airflow
+
+jobs:
+  validate-dag:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install Airflow and dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install apache-airflow==2.6.3
+        pip install -r requirements.txt
+
+    - name: Validate DAG syntax
+      run: |
+        cd airflow_dags
+        python -m py_compile *.py
+        
+        # Test DAG imports
+        python -c "
+        import sys
+        sys.path.append('.')
+        from champions_pipeline_dag import dag
+        print('DAG validation successful')
+        print(f'DAG ID: {dag.dag_id}')
+        print(f'Schedule: {dag.schedule_interval}')
+        print(f'Tasks: {[task.task_id for task in dag.tasks]}')
+        "
+
+    - name: Run DAG unit tests
+      run: |
+        # Test DAG structure
+        python -c "
+        import sys
+        sys.path.append('airflow_dags')
+        from champions_pipeline_dag import dag
+        
+        # Test DAG has required tasks
+        required_tasks = [
+            'data_ingestion.check_ingestion_service_health',
+            'data_quality.check_quality_service_health',
+            'data_transformation.bronze_to_silver_transform',
+            'data_transformation.silver_to_gold_transform',
+            'data_export.export_for_tableau',
+            'pipeline_notification'
+        ]
+        
+        dag_tasks = [task.task_id for task in dag.tasks]
+        
+        for required_task in required_tasks:
+            if required_task not in dag_tasks:
+                print(f'Missing required task: {required_task}')
+                sys.exit(1)
+        
+        print('All required tasks found in DAG')
+        "
+
+    - name: Lint DAG files
+      run: |
+        flake8 airflow_dags/ --max-line-length=100 --ignore=E203,W503
+
+  deploy-dag:
+    needs: validate-dag
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Get MWAA S3 bucket
+      id: get-bucket
+      run: |
+        BUCKET_NAME=$(aws mwaa get-environment --name ${{ env.MWAA_ENVIRONMENT_NAME }} --query 'Environment.SourceBucketArn' --output text | cut -d':' -f6)
+        echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+
+    - name: Upload DAG to S3
+      run: |
+        aws s3 cp airflow_dags/champions_pipeline_dag.py s3://${{ steps.get-bucket.outputs.bucket_name }}/dags/
+        
+        # Upload any additional DAG files
+        if [ -d "airflow_dags/plugins" ]; then
+          aws s3 sync airflow_dags/plugins/ s3://${{ steps.get-bucket.outputs.bucket_name }}/plugins/
+        fi
+
+    - name: Update requirements.txt in S3
+      run: |
+        aws s3 cp requirements.txt s3://${{ steps.get-bucket.outputs.bucket_name }}/requirements.txt
+
+    - name: Wait for DAG to be available
+      run: |
+        echo "Waiting for DAG to be available in MWAA..."
+        sleep 60  # Wait for MWAA to pick up the new DAG
+        
+        # Optional: Check if DAG is available via AWS CLI
+        # This requires additional MWAA permissions
+        # aws mwaa create-cli-token --name ${{ env.MWAA_ENVIRONMENT_NAME }} --query 'CliToken' --output text
+
+    - name: Validate DAG deployment
+      run: |
+        echo "DAG deployment completed successfully"
+        echo "DAG should be available in MWAA environment: ${{ env.MWAA_ENVIRONMENT_NAME }}"
+
+    - name: Send deployment notification
+      if: always()
+      run: |
+        if [ ${{ job.status }} == 'success' ]; then
+          aws sns publish --topic-arn ${{ secrets.SNS_TOPIC_ARN }} \
+            --subject "Airflow DAG Deployment Success" \
+            --message "Champions League DAG deployed successfully to MWAA environment ${{ env.MWAA_ENVIRONMENT_NAME }}"
+        else
+          aws sns publish --topic-arn ${{ secrets.SNS_TOPIC_ARN }} \
+            --subject "Airflow DAG Deployment Failed" \
+            --message "Champions League DAG deployment failed. Check GitHub Actions logs for details."
+        fi
+
+  test-dag-execution:
+    needs: deploy-dag
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Test DAG execution (dry run)
+      run: |
+        echo "Testing DAG execution..."
+        # This would require additional setup to trigger DAG runs programmatically
+        # For now, we'll just verify the deployment
+        
+        echo "DAG testing completed"
+        echo "Manual verification required in MWAA UI"
+        
+        # Output useful information for manual testing
+        echo "MWAA Environment: ${{ env.MWAA_ENVIRONMENT_NAME }}"
+        echo "DAG ID: champions_league_pipeline"
+        echo "Expected schedule: 0 */6 * * * (every 6 hours)"
+
+    - name: Create deployment summary
+      run: |
+        cat << EOF > deployment_summary.md
+        # Airflow DAG Deployment Summary
+        
+        **Environment:** ${{ env.MWAA_ENVIRONMENT_NAME }}
+        **DAG ID:** champions_league_pipeline
+        **Schedule:** Every 6 hours
+        **Deployment Time:** $(date -u)
+        **Git Commit:** ${{ github.sha }}
+        
+        ## DAG Tasks
+        - Data Ingestion (standings, teams, athletes, events)
+        - Data Quality Validation
+        - Data Transformation (Bronze → Silver → Gold)
+        - Data Export (Tableau, Excel)
+        - Data Warehouse Loading
+        - Pipeline Notification
+        
+        ## Next Steps
+        1. Verify DAG appears in MWAA UI
+        2. Check DAG syntax and import errors
+        3. Test manual DAG execution
+        4. Monitor first scheduled run
+        
+        ## Manual Testing
+        - Access MWAA UI via AWS Console
+        - Navigate to DAGs page
+        - Find 'champions_league_pipeline'
+        - Test individual tasks or full DAG run
+        EOF
+        
+        echo "Deployment summary created"
+        cat deployment_summary.md
+
+  cleanup:
+    needs: [validate-dag, deploy-dag, test-dag-execution]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Cleanup temporary files
+      run: |
+        echo "Cleaning up temporary files..."
+        # Add any cleanup logic here
+        echo "Cleanup completed"

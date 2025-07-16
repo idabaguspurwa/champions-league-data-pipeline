@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: champions-league
+data:
+  base_url: "https://uefa-champions-league1.p.rapidapi.com"
+  rapidapi_host: "uefa-champions-league1.p.rapidapi.com"
+  rate_limit: "100"
+  timeout: "30"
+  retry_attempts: "3"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingestion-config
+  namespace: champions-league
+data:
+  config.yaml: |
+    ingestion:
+      batch_size: 1000
+      max_retries: 3
+      retry_delay: 5
+      parallel_requests: 10
+      endpoints:
+        - name: "standings"
+          path: "/standingsv2"
+          schedule: "0 */6 * * *"
+          parameters:
+            season: "2024"
+        - name: "team_info"
+          path: "/team/info"
+          schedule: "0 0 * * *"
+        - name: "team_performance"
+          path: "/team/perfomance"
+          schedule: "0 1 * * *"
+        - name: "team_results"
+          path: "/team/results"
+          schedule: "0 2 * * *"
+        - name: "athlete_statistics"
+          path: "/athlete/statistic"
+          schedule: "0 3 * * *"
+        - name: "athlete_bio"
+          path: "/athlete/bio"
+          schedule: "0 4 * * *"
+        - name: "athlete_season_stats"
+          path: "/athlete/season"
+          schedule: "0 5 * * *"
+        - name: "athlete_overview"
+          path: "/athlete/overview"
+          schedule: "0 6 * * *"
+    storage:
+      s3_bucket: "champions-league-data-lake"
+      bronze_prefix: "bronze/"
+      compression: "gzip"
+      file_format: "json"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-quality-config
+  namespace: champions-league
+data:
+  config.yaml: |
+    data_quality:
+      validation_rules:
+        - name: "completeness_check"
+          threshold: 0.95
+        - name: "uniqueness_check"
+          columns: ["id", "uid"]
+        - name: "range_check"
+          columns: ["score", "ranking"]
+        - name: "format_check"
+          columns: ["date", "timestamp"]
+      alerts:
+        slack_webhook: ""
+        email_recipients: []
+      reporting:
+        generate_html_report: true
+        save_to_s3: true
+        s3_bucket: "champions-league-data-lake"
+        s3_prefix: "reports/"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: great-expectations-config
+  namespace: champions-league
+data:
+  great_expectations.yml: |
+    config_version: 3.0
+    datasources:
+      s3_datasource:
+        class_name: Datasource
+        execution_engine:
+          class_name: PandasExecutionEngine
+        data_connectors:
+          default_inferred_data_connector:
+            class_name: InferredAssetS3DataConnector
+            bucket: champions-league-data-lake
+            prefix: bronze/
+            default_regex:
+              group_names:
+                - data_asset_name
+              pattern: (.*)\.json
+    stores:
+      expectations_store:
+        class_name: ExpectationsStore
+        store_backend:
+          class_name: S3StoreBackend
+          bucket: champions-league-data-lake
+          prefix: expectations/
+      validations_store:
+        class_name: ValidationsStore
+        store_backend:
+          class_name: S3StoreBackend
+          bucket: champions-league-data-lake
+          prefix: validations/
+      evaluation_parameter_store:
+        class_name: EvaluationParameterStore
+    expectations_store_name: expectations_store
+    validations_store_name: validations_store
+    evaluation_parameter_store_name: evaluation_parameter_store
+    data_docs_sites:
+      s3_site:
+        class_name: SiteBuilder
+        store_backend:
+          class_name: S3StoreBackend
+          bucket: champions-league-data-lake
+          prefix: data_docs/
+        site_index_builder:
+          class_name: DefaultSiteIndexBuilder

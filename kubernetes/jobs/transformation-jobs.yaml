@@ -1,0 +1,99 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-transformation-bronze-to-silver
+  namespace: champions-league
+  labels:
+    app: data-transformation
+    layer: bronze-to-silver
+spec:
+  template:
+    metadata:
+      labels:
+        app: data-transformation
+        layer: bronze-to-silver
+    spec:
+      containers:
+      - name: spark-transformation
+        image: champions-league/data-transformation:latest
+        command: ["python", "transform_bronze_to_silver.py"]
+        env:
+        - name: AWS_REGION
+          value: "ap-southeast-1"
+        - name: S3_BUCKET
+          value: "champions-league-data-lake"
+        - name: SPARK_MASTER
+          value: "local[*]"
+        - name: INPUT_PATH
+          value: "s3a://champions-league-data-lake/bronze/"
+        - name: OUTPUT_PATH
+          value: "s3a://champions-league-data-lake/silver/"
+        - name: LOG_LEVEL
+          value: "INFO"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: spark-config
+          mountPath: /app/spark-config
+      volumes:
+      - name: spark-config
+        configMap:
+          name: spark-config
+      restartPolicy: Never
+      serviceAccountName: data-transformation-sa
+  backoffLimit: 3
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-transformation-silver-to-gold
+  namespace: champions-league
+  labels:
+    app: data-transformation
+    layer: silver-to-gold
+spec:
+  template:
+    metadata:
+      labels:
+        app: data-transformation
+        layer: silver-to-gold
+    spec:
+      containers:
+      - name: spark-transformation
+        image: champions-league/data-transformation:latest
+        command: ["python", "transform_silver_to_gold.py"]
+        env:
+        - name: AWS_REGION
+          value: "ap-southeast-1"
+        - name: S3_BUCKET
+          value: "champions-league-data-lake"
+        - name: SPARK_MASTER
+          value: "local[*]"
+        - name: INPUT_PATH
+          value: "s3a://champions-league-data-lake/silver/"
+        - name: OUTPUT_PATH
+          value: "s3a://champions-league-data-lake/gold/"
+        - name: LOG_LEVEL
+          value: "INFO"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: spark-config
+          mountPath: /app/spark-config
+      volumes:
+      - name: spark-config
+        configMap:
+          name: spark-config
+      restartPolicy: Never
+      serviceAccountName: data-transformation-sa
+  backoffLimit: 3
