@@ -50,8 +50,8 @@ jobs:
 
       - name: "Install dependencies"
         run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-cov flake8 black mypy
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
 
       - name: "Run linters and type checking"
         run: |
@@ -92,15 +92,26 @@ jobs:
       - name: "Login to Amazon ECR"
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: "Build, tag, and push image to ECR"
+      - name: "Build, tag, and push image to Amazon ECR"
         id: build-image
         env:
-          IMAGE_TAG: ${{ github.sha }}
           ECR_REPOSITORY: champions-league/data-${{ matrix.service }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t ${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG -f docker/Dockerfile-${{ matrix.service }} .
-          docker push ${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image_uri=${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          DOCKERFILE="Dockerfile.python"
+          BUILD_ARGS="--build-arg SERVICE_DIR=${{ matrix.service }}"
+          if [[ "${{ matrix.service }}" == "transformation" ]]; then
+            echo "Using Spark Dockerfile for transformation service..."
+            DOCKERFILE="Dockerfile.spark"
+            BUILD_ARGS=""
+          fi
+
+          docker build \
+            $BUILD_ARGS \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -f $DOCKERFILE .
+            
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
       - name: "Run Trivy vulnerability scanner"
         uses: aquasecurity/trivy-action@master

@@ -1,0 +1,13 @@
+# Install all production requirements from the other file
+-r requirements.txt
+
+# Testing
+pytest==7.4.3
+pytest-mock==3.12.0
+moto==4.2.12
+
+# Development
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+pre-commit==3.5.0
