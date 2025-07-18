@@ -56,7 +56,7 @@ jobs:
             --volume ${{ github.workspace }}:/app \
             --workdir /app \
             $ECR_REGISTRY/champions-league/ci-base:latest \
-            /bin/sh -c "airflow db init && pip install 'apache-airflow[cncf.kubernetes,http]==$AIRFLOW_VERSION' && pytest tests/"
+            /bin/sh -c "pip install 'apache-airflow[cncf.kubernetes,http]==$AIRFLOW_VERSION' && pytest tests/"
 
   ## -----------------------------------------------------------------
   ## 2. Deploy to MWAA (Runs only on merge/push to main)
