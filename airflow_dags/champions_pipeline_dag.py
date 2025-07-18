@@ -24,7 +24,18 @@ from unittest.mock import MagicMock
 sys.modules['airflow.providers.cncf.kubernetes'] = types.ModuleType('airflow.providers.cncf.kubernetes')
 sys.modules['airflow.providers.cncf.kubernetes.operators'] = MagicMock()
 sys.modules['airflow.providers.cncf.kubernetes.operators.pod'] = MagicMock()
-sys.modules['airflow.providers.cncf.kubernetes.get_provider_info'] = MagicMock()
+
+provider_info = {
+    "name": "Kubernetes",
+    "description": "Kubernetes provider (mocked for tests)",
+    "package-name": "airflow-provider-cncf-kubernetes",
+    "version": "0.0.0",
+}
+
+get_provider_info_mod = types.ModuleType("airflow.providers.cncf.kubernetes.get_provider_info")
+get_provider_info_mod.get_provider_info = lambda: provider_info
+
+sys.modules['airflow.providers.cncf.kubernetes.get_provider_info'] = get_provider_info_mod
 
 # --- Configuration (loaded once at the top) ---
 NAMESPACE = Variable.get("k8s_namespace", default_var="default")
