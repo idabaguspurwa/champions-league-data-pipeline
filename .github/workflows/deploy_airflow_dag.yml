@@ -58,7 +58,7 @@ jobs:
             /bin/sh -c "airflow db init && pytest tests/"
 
   ## -----------------------------------------------------------------
-  ## 2. Deploy to MWAA (Runs only on merge/push to main)
+  ## 2. Deploy to MWAA (Runs only on merge/push to main).
   ## -----------------------------------------------------------------
   deploy_to_mwaa:
     name: "🚀 Deploy to MWAA"
