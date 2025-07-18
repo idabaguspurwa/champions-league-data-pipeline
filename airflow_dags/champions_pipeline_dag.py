@@ -11,7 +11,7 @@ from typing import List, Dict, Any
 from airflow.decorators import dag, task, task_group
 
 # Operators and sensors remain the same
-from airflow.providers.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
+from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.http.operators.http import SimpleHttpOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.models import Variable
