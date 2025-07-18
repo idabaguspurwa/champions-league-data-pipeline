@@ -170,9 +170,9 @@ def champions_league_pipeline():
         arguments=['load_to_redshift.py'],
         env_vars={
             'INPUT_PATH': f's3a://{S3_BUCKET}/gold/',
-            'REDSHIFT_CLUSTER': Variable.get('redshift_cluster'),
-            'REDSHIFT_DATABASE': Variable.get('redshift_database'),
-            'REDSHIFT_USER': Variable.get('redshift_user')
+            'REDSHIFT_CLUSTER': '{{ var.value.redshift_cluster }}',
+            'REDSHIFT_DATABASE': '{{ var.value.redshift_database }}',
+            'REDSHIFT_USER': '{{ var.value.redshift_user }}'
         },
         resources={'request_memory': '1Gi', 'limit_memory': '2Gi', 'request_cpu': '500m', 'limit_cpu': '1000m'}
     )
