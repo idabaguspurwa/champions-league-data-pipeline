@@ -1,8 +1,20 @@
 import os
+import sys
+from unittest.mock import MagicMock
+
 # Set the AIRFLOW_HOME environment variable to a temporary directory
 os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
 # Configure Airflow to use a temporary SQLite database for testing
 os.environ['AIRFLOW__CORE__SQL_ALCHEMY_CONN'] = 'sqlite:////tmp/airflow/airflow.db'
+
+# Mock the kubernetes provider before importing anything else
+sys.modules['airflow.providers.kubernetes'] = MagicMock()
+sys.modules['airflow.providers.kubernetes.operators'] = MagicMock()
+sys.modules['airflow.providers.kubernetes.operators.kubernetes_pod'] = MagicMock()
+sys.modules['airflow.providers.cncf'] = MagicMock()
+sys.modules['airflow.providers.cncf.kubernetes'] = MagicMock()
+sys.modules['airflow.providers.cncf.kubernetes.operators'] = MagicMock()
+sys.modules['airflow.providers.cncf.kubernetes.operators.kubernetes_pod'] = MagicMock()
 
 import pytest
 from airflow.models.dagbag import DagBag
@@ -36,4 +48,4 @@ def test_no_import_errors():
     """Asserts that there are no import errors in the DagBag."""
     assert len(DAGBAG.import_errors) == 0, (
         f"DAG import errors found: {DAGBAG.import_errors}"
-    ) 
+    )
