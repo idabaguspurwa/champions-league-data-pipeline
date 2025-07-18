@@ -233,8 +233,10 @@ def champions_league_pipeline():
         sns_client = boto3.client('sns', region_name=AWS_REGION)
         if dag_run is not None:
             failed_tasks = [ti.task_id for ti in dag_run.get_task_instances(state='failed')]
+            execution_date = dag_run.logical_date.to_date_string() if hasattr(dag_run, "logical_date") else "N/A"
         else:
             failed_tasks = []
+            execution_date = "N/A"
         
         status = "FAILED" if failed_tasks else "SUCCESS"
         subject = f"Champions League Pipeline - {status}"
@@ -242,7 +244,7 @@ def champions_league_pipeline():
 
         sns_client.publish(
             TopicArn=SNS_TOPIC_ARN, Subject=subject,
-            Message=f"Pipeline Status: {status}\nExecution Date: {dag_run.logical_date.to_date_string()}\n{message_body}"
+            Message=f"Pipeline Status: {status}\nExecution Date: {execution_date}\n{message_body}"
         )
         return subject
 
