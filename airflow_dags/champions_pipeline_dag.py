@@ -92,10 +92,22 @@ def dummy_kubernetes_decorator(*args, **kwargs):
         return f
     return wrapper
 
-# Ensure airflow.decorators.task is a module and add the dummy decorator
-if 'airflow.decorators.task' not in sys.modules:
-    sys.modules['airflow.decorators.task'] = types.ModuleType('airflow.decorators.task')
-setattr(sys.modules['airflow.decorators.task'], 'kubernetes', dummy_kubernetes_decorator)
+# Patch airflow.decorators.task.kubernetes to a dummy decorator
+def dummy_kubernetes_decorator(*args, **kwargs):
+    def wrapper(f):
+        return f
+    return wrapper
+
+# If airflow.decorators is already imported, patch its 'task' attribute
+if 'airflow.decorators' in sys.modules:
+    task_obj = getattr(sys.modules['airflow.decorators'], 'task', None)
+    if task_obj:
+        setattr(task_obj, 'kubernetes', dummy_kubernetes_decorator)
+else:
+    # If not imported, create a dummy 'task' object with 'kubernetes'
+    task_mod = types.SimpleNamespace()
+    task_mod.kubernetes = dummy_kubernetes_decorator
+    sys.modules['airflow.decorators.task'] = task_mod
 
 @dag(
     dag_id='champions_league_pipeline_v2',
