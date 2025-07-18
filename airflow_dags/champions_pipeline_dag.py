@@ -28,7 +28,7 @@ sys.modules['airflow.providers.cncf.kubernetes.operators.pod'] = MagicMock()
 provider_info = {
     "name": "Kubernetes",
     "description": "Kubernetes provider (mocked for tests)",
-    "package-name": "apache-airflow-providers-cncf-kubernetes",  # <-- fix here
+    "package-name": "apache-airflow-providers-cncf-kubernetes", 
     "version": "0.0.0",
 }
 
@@ -86,6 +86,16 @@ def create_kubernetes_pod_operator(
         env_vars=default_env_vars, resources=default_resources, get_logs=True,
         is_delete_operator_pod=True, **kwargs
     )
+
+def dummy_kubernetes_decorator(*args, **kwargs):
+    def wrapper(f):
+        return f
+    return wrapper
+
+# Ensure airflow.decorators.task is a module and add the dummy decorator
+if 'airflow.decorators.task' not in sys.modules:
+    sys.modules['airflow.decorators.task'] = types.ModuleType('airflow.decorators.task')
+setattr(sys.modules['airflow.decorators.task'], 'kubernetes', dummy_kubernetes_decorator)
 
 @dag(
     dag_id='champions_league_pipeline_v2',
