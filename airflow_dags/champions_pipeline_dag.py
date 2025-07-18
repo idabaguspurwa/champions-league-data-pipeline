@@ -16,6 +16,16 @@ from airflow.providers.http.operators.http import SimpleHttpOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.models import Variable
 
+import types
+import sys
+from unittest.mock import MagicMock
+
+# Make 'airflow.providers.cncf.kubernetes' a module, not just a MagicMock
+sys.modules['airflow.providers.cncf.kubernetes'] = types.ModuleType('airflow.providers.cncf.kubernetes')
+sys.modules['airflow.providers.cncf.kubernetes.operators'] = MagicMock()
+sys.modules['airflow.providers.cncf.kubernetes.operators.pod'] = MagicMock()
+sys.modules['airflow.providers.cncf.kubernetes.get_provider_info'] = MagicMock()
+
 # --- Configuration (loaded once at the top) ---
 NAMESPACE = Variable.get("k8s_namespace", default_var="default")
 IMAGE_PULL_POLICY = Variable.get("image_pull_policy", default_var="Always")
