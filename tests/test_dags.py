@@ -15,6 +15,7 @@ sys.modules['airflow.providers.cncf'] = MagicMock()
 sys.modules['airflow.providers.cncf.kubernetes'] = MagicMock()
 sys.modules['airflow.providers.cncf.kubernetes.operators'] = MagicMock()
 sys.modules['airflow.providers.cncf.kubernetes.operators.kubernetes_pod'] = MagicMock()
+sys.modules['airflow.providers.cncf.kubernetes.operators.pod'] = MagicMock()
 
 import pytest
 from airflow.models.dagbag import DagBag
