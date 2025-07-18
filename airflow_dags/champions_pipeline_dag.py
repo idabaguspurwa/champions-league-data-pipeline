@@ -28,7 +28,7 @@ sys.modules['airflow.providers.cncf.kubernetes.operators.pod'] = MagicMock()
 provider_info = {
     "name": "Kubernetes",
     "description": "Kubernetes provider (mocked for tests)",
-    "package-name": "airflow-provider-cncf-kubernetes",
+    "package-name": "apache-airflow-providers-cncf-kubernetes",  # <-- fix here
     "version": "0.0.0",
 }
 
