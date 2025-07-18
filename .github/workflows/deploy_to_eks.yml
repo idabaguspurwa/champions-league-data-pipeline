@@ -53,12 +53,15 @@ jobs:
       - name: "Run tests in Docker container"
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           docker run --rm \
+            -e AIRFLOW_HOME=/tmp/airflow \
+            -e AIRFLOW__CORE__SQL_ALCHEMY_CONN=sqlite:////tmp/airflow/airflow.db \
             --volume ${{ github.workspace }}:/app \
             --workdir /app \
-            $ECR_REGISTRY/champions-league/ci-base:latest \
-            /bin/sh -c "pytest tests/"
+            $ECR_REGISTRY/champions-league/ci-base:$IMAGE_TAG \
+            /bin/sh -c "airflow db init && pytest tests/"
 
   ## -----------------------------------------------------------------
   ## 2. Build, Push, and Scan Images

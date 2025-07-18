@@ -2,7 +2,7 @@ import pendulum
 from airflow.decorators import dag
 from airflow.operators.bash import BashOperator
 
-# Define default arguments, including a specific owner
+# Define default arguments, including a specific owner.
 default_args = {
     'owner': 'data-engineering-team'
 }
