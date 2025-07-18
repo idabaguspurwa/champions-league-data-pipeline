@@ -1,12 +1,12 @@
-# Trigger CI Build.
+# Use the same base Python version as your project
 FROM python:3.9-slim-bullseye
 
-# Set environment variables to prevent Python from writing .pyc files
+# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Install essential build tools
-RUN apt-get update && apt-get install -y --no-install-recommends gcc g++
+RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
 WORKDIR /app
@@ -15,6 +15,9 @@ WORKDIR /app
 COPY requirements.txt .
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# This command will fail the build if there are any broken dependencies.
+RUN pip check
 
 # Copy the rest of the project code into the image
 COPY . .
