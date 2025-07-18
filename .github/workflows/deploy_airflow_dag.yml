@@ -50,16 +50,13 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           AIRFLOW_VERSION: ${{ env.AIRFLOW_VERSION }}
         run: |
-          # This command runs tests inside your pre-built CI container.
-          # It now includes environment variables to configure a temporary test database
-          # and installs the necessary Airflow provider extras.
           docker run --rm \
             -e AIRFLOW_HOME=/tmp/airflow \
             -e AIRFLOW__CORE__SQL_ALCHEMY_CONN=sqlite:////tmp/airflow/airflow.db \
             --volume ${{ github.workspace }}:/app \
             --workdir /app \
             $ECR_REGISTRY/champions-league/ci-base:latest \
-            /bin/sh -c "pip install 'apache-airflow[cncf.kubernetes,http]==$AIRFLOW_VERSION' && pytest tests/"
+            /bin/sh -c "airflow db init && pip install 'apache-airflow[cncf.kubernetes,http]==$AIRFLOW_VERSION' && pytest tests/"
 
   ## -----------------------------------------------------------------
   ## 2. Deploy to MWAA (Runs only on merge/push to main)
