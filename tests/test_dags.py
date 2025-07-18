@@ -1,4 +1,9 @@
 import os
+# Set the AIRFLOW_HOME environment variable to a temporary directory
+os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
+# Configure Airflow to use a temporary SQLite database for testing
+os.environ['AIRFLOW__CORE__SQL_ALCHEMY_CONN'] = 'sqlite:////tmp/airflow/airflow.db'
+
 import pytest
 from airflow.models.dagbag import DagBag
 
