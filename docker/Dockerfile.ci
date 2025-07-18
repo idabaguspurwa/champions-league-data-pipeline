@@ -1,0 +1,19 @@
+FROM python:3.9-slim-bullseye
+
+# Set environment variables to prevent Python from writing .pyc files
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install essential build tools
+RUN apt-get update && apt-get install -y --no-install-recommends gcc g++
+
+# Set the working directory
+WORKDIR /app
+
+# Copy and install all development requirements
+COPY requirements.txt .
+COPY requirements-dev.txt .
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# Copy the rest of the project code into the image
+COPY . .

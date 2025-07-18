@@ -1,4 +1,4 @@
-# Install all production requirements from the other file
+# Install all production requirements
 -r requirements.txt
 
 # Testing

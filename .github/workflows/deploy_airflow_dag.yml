@@ -6,12 +6,14 @@ on:
     paths:
       - 'airflow_dags/**'
       - 'requirements.txt'
+      - 'requirements-dev.txt'
       - '.github/workflows/deploy_airflow_dag.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'airflow_dags/**'
       - 'requirements.txt'
+      - 'requirements-dev.txt'
 
 env:
   AWS_REGION: ap-southeast-1
@@ -29,35 +31,23 @@ jobs:
   ## 1. Validate DAGs (Runs on PRs and pushes to main)
   ## -----------------------------------------------------------------
   validate_dags:
-    name: "Validate DAGs"
+    name: "🧪 Validate DAGs"
     runs-on: ubuntu-latest
+
+    # This section pulls your pre-built image from ECR
+    # and runs all steps inside that container.
+    container:
+      image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com/champions-league/ci-base:latest
+
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v4
 
-      - name: "Set up Python ${{ env.PYTHON_VERSION }}"
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
+      - name: "Install specific Airflow version for validation"
+        run: pip install "apache-airflow[cncf.kubernetes,http]==${{ env.AIRFLOW_VERSION }}"
 
-      - name: "Cache Pip dependencies"
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ env.AIRFLOW_VERSION }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ env.AIRFLOW_VERSION }}-
-
-      - name: "Install dependencies"
-        run: |
-          python -m pip install --upgrade pip
-          pip install "apache-airflow==${{ env.AIRFLOW_VERSION }}"
-          pip install -r requirements-dev.txt
-
-      - name: "Lint and Test DAGs with Pytest"
-        run: |
-          # The pytest command will automatically discover and run tests in the 'tests/' directory
-          pytest tests/
+      - name: "Run DAG tests with Pytest"
+        run: pytest tests/
 
   ## -----------------------------------------------------------------
   ## 2. Deploy to MWAA (Runs only on merge/push to main)
@@ -87,13 +77,8 @@ jobs:
 
       - name: "Sync files to MWAA S3 Bucket"
         run: |
-          # Use sync to handle all DAGs, new files, and deletions
           aws s3 sync airflow_dags/ s3://${{ steps.get_bucket.outputs.bucket_name }}/dags/ --delete
-          
-          # Sync requirements if it exists
-          if [ -f "requirements.txt" ]; then
-            aws s3 cp requirements.txt s3://${{ steps.get_bucket.outputs.bucket_name }}/requirements.txt
-          fi
+          aws s3 cp requirements.txt s3://${{ steps.get_bucket.outputs.bucket_name }}/requirements.txt
 
       - name: "Create Deployment Summary"
         run: |
@@ -116,6 +101,6 @@ jobs:
             MESSAGE="Champions League DAG deployment failed. Check GitHub Actions logs for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi
           
-          aws sns publish --topic-arn "${{ secrets.SNS_TOPIC_ARN }}" \
+          aws sns publish --topic-arn "${{ secrets.SNS_TOP_ARN }}" \
             --subject "$SUBJECT" \
             --message "$MESSAGE"
