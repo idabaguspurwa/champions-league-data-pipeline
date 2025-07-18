@@ -17,11 +17,11 @@ from airflow.providers.http.sensors.http import HttpSensor
 from airflow.models import Variable
 
 # --- Configuration (loaded once at the top) ---
-NAMESPACE = Variable.get("k8s_namespace", default_var="champions-league")
+NAMESPACE = Variable.get("k8s_namespace", default_var="default")
 IMAGE_PULL_POLICY = Variable.get("image_pull_policy", default_var="Always")
 AWS_REGION = Variable.get("aws_region", default_var="ap-southeast-1")
-S3_BUCKET = Variable.get("s3_bucket", default_var="champions-league-data-lake")
-SNS_TOPIC_ARN = Variable.get("sns_topic_arn", default_var="arn:aws:sns:ap-southeast-1:123456789012:MyTopic")
+S3_BUCKET = Variable.get("s3_bucket", default_var="champions-league-data-lake-pghuqgrt")
+SNS_TOPIC_ARN = Variable.get("sns_topic_arn", default_var="arn:aws:sns:ap-southeast-1:665049067659:champions-league-pipeline-notifications")
 
 # Define data for dynamic task generation to reduce repetition
 INGESTION_CONFIGS = [
