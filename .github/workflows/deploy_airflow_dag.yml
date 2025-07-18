@@ -21,7 +21,7 @@ env:
   PYTHON_VERSION: '3.9'
   AIRFLOW_VERSION: '2.10.3'
 
-# Set permissions for OIDC
+# Set permissions for OIDC.
 permissions:
   id-token: write
   contents: read

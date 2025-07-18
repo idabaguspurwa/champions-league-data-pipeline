@@ -1,5 +1,6 @@
 # Include Airflow with necessary extras for testing
 apache-airflow[cncf.kubernetes,http]==2.10.3
+apache-airflow-providers-cncf-kubernetes==8.4.0
 
 # Install all production requirements
 -r requirements.txt
