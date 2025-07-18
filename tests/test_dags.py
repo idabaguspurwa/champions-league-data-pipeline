@@ -2,6 +2,10 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+# Mock boto3.client to prevent real AWS calls during DAG parsing/tests
+import boto3
+boto3.client = MagicMock()
+
 # Set the AIRFLOW_HOME environment variable to a temporary directory
 os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
 # Configure Airflow to use a temporary SQLite database for testing
