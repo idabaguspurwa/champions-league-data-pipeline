@@ -7,7 +7,7 @@ on:
       - 'src/**'
       - 'kubernetes/**'
       - 'docker/**'
-      - 'requirements*.txt' 
+      - 'requirements*.txt'
       - '.github/workflows/deploy_to_eks.yml'
   pull_request:
     branches: [ main ]
@@ -29,32 +29,36 @@ permissions:
   security-events: write
 
 jobs:
+  ## -----------------------------------------------------------------
+  ## 1. Run Linters and Tests
+  ## -----------------------------------------------------------------
   test:
     name: "🧪 Test and Analyze"
     runs-on: ubuntu-latest
     
-    # Use the pre-built CI image from ECR for speed and reliability
-    container:
-      image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com/champions-league/ci-base:latest
-
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v4
 
-      - name: "Run linters and type checking"
-        run: |
-          black --check src/
-          flake8 src/
-          mypy src/ --ignore-missing-imports
-
-      - name: "Run unit tests and generate coverage"
-        run: pytest tests/ --cov=src --cov-report=xml
-
-      - name: "Upload coverage to Codecov"
-        uses: codecov/codecov-action@v4
+      - name: "Configure AWS credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Login to Amazon ECR"
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: "Run tests in Docker container"
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker run --rm \
+            --volume ${{ github.workspace }}:/app \
+            --workdir /app \
+            $ECR_REGISTRY/champions-league/ci-base:latest \
+            /bin/sh -c "pytest tests/"
 
   ## -----------------------------------------------------------------
   ## 2. Build, Push, and Scan Images
@@ -92,7 +96,7 @@ jobs:
           if [[ "${{ matrix.service }}" == "transformation" ]]; then
             echo "Using Spark Dockerfile for transformation service..."
             DOCKERFILE="Dockerfile.spark"
-            BUILD_ARGS="" # No build-arg needed as the path is hardcoded
+            BUILD_ARGS=""
           fi
 
           docker build \
