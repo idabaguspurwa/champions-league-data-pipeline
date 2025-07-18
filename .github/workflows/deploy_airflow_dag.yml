@@ -27,27 +27,34 @@ permissions:
   contents: read
 
 jobs:
-  ## -----------------------------------------------------------------
-  ## 1. Validate DAGs (Runs on PRs and pushes to main)
-  ## -----------------------------------------------------------------
   validate_dags:
     name: "🧪 Validate DAGs"
     runs-on: ubuntu-latest
-
-    # This section pulls your pre-built image from ECR
-    # and runs all steps inside that container.
-    container:
-      image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com/champions-league/ci-base:latest
-
+    
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v4
 
-      - name: "Install specific Airflow version for validation"
-        run: pip install "apache-airflow[cncf.kubernetes,http]==${{ env.AIRFLOW_VERSION }}"
+      - name: "Configure AWS credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: "Run DAG tests with Pytest"
-        run: pytest tests/
+      - name: "Login to Amazon ECR"
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: "Run DAG tests in Docker container"
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          AIRFLOW_VERSION: ${{ env.AIRFLOW_VERSION }}
+        run: |
+          docker run --rm \
+            --volume ${{ github.workspace }}:/app \
+            --workdir /app \
+            $ECR_REGISTRY/champions-league/ci-base:latest \
+            /bin/sh -c "pip install 'apache-airflow[cncf.kubernetes,http]==$AIRFLOW_VERSION' && pytest tests/"
 
   ## -----------------------------------------------------------------
   ## 2. Deploy to MWAA (Runs only on merge/push to main)

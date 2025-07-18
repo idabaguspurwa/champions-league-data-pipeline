@@ -29,9 +29,6 @@ permissions:
   security-events: write
 
 jobs:
-  ## -----------------------------------------------------------------
-  ## 1. Run Linters and Tests in a Pre-built Container
-  ## -----------------------------------------------------------------
   test:
     name: "🧪 Test and Analyze"
     runs-on: ubuntu-latest
