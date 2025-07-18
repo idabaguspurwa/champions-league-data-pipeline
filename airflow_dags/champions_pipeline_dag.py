@@ -10,7 +10,7 @@ from typing import List, Dict, Any
 # Use the @dag decorator for a cleaner DAG definition
 from airflow.decorators import dag, task, task_group
 
-# Operators and sensors remain the same.
+# Operators and sensors remain the same
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.http.operators.http import SimpleHttpOperator
 from airflow.providers.http.sensors.http import HttpSensor
