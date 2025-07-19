@@ -15,6 +15,7 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from airflow.providers.http.operators.http import SimpleHttpOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.models import Variable
+from kubernetes.client import models as k8s
 
 # --- Configuration (loaded once at the top) ---
 NAMESPACE = Variable.get("k8s_namespace", default_var="default")
@@ -52,18 +53,32 @@ def create_kubernetes_pod_operator(
     if env_vars:
         default_env_vars.update(env_vars)
     
+    # Define default resources and update with any provided overrides
+    # The keys now match the V1ResourceRequirements object: requests and limits
     default_resources = {
-        'request_memory': '512Mi', 'request_cpu': '250m',
-        'limit_memory': '1Gi', 'limit_cpu': '500m'
+        'requests': {'memory': '512Mi', 'cpu': '250m'},
+        'limits': {'memory': '1Gi', 'cpu': '500m'}
     }
     if resources:
         default_resources.update(resources)
+
+    # Create the Kubernetes V1ResourceRequirements object
+    k8s_resources = k8s.V1ResourceRequirements(**default_resources)
         
     return KubernetesPodOperator(
-        task_id=task_id, name=f"cl-{task_id}", namespace=NAMESPACE, image=image,
-        image_pull_policy=IMAGE_PULL_POLICY, cmds=command, arguments=arguments,
-        env_vars=default_env_vars, resources=default_resources, get_logs=True,
-        is_delete_operator_pod=True, **kwargs
+        task_id=task_id,
+        name=f"cl-{task_id}",
+        namespace=NAMESPACE,
+        image=image,
+        image_pull_policy=IMAGE_PULL_POLICY,
+        cmds=command,
+        arguments=arguments,
+        env_vars=default_env_vars,
+        # Use the container_resources parameter with the k8s object
+        container_resources=k8s_resources,
+        get_logs=True,
+        is_delete_operator_pod=True,
+        **kwargs
     )
 
 @dag(
@@ -132,16 +147,20 @@ def champions_league_pipeline():
             task_id='bronze_to_silver_transform', image='champions-league/data-transformation:latest',
             command=['python'], arguments=['transform_bronze_to_silver.py'],
             env_vars={'INPUT_PATH': f's3a://{S3_BUCKET}/bronze/', 'OUTPUT_PATH': f's3a://{S3_BUCKET}/silver/'},
-            resources={'request_memory': '2Gi', 'limit_memory': '4Gi', 'request_cpu': '1000m', 'limit_cpu': '2000m'}
+            resources={
+                'requests': {'memory': '2Gi', 'cpu': '1000m'},
+                'limits': {'memory': '4Gi', 'cpu': '2000m'}
+            }
         )
-        
         silver_to_gold = create_kubernetes_pod_operator(
             task_id='silver_to_gold_transform', image='champions-league/data-transformation:latest',
             command=['python'], arguments=['transform_silver_to_gold.py'],
             env_vars={'INPUT_PATH': f's3a://{S3_BUCKET}/silver/', 'OUTPUT_PATH': f's3a://{S3_BUCKET}/gold/'},
-            resources={'request_memory': '2Gi', 'limit_memory': '4Gi', 'request_cpu': '1000m', 'limit_cpu': '2000m'}
+            resources={
+                'requests': {'memory': '2Gi', 'cpu': '1000m'},
+                'limits': {'memory': '4Gi', 'cpu': '2000m'}
+            }
         )
-        
         bronze_to_silver >> silver_to_gold
 
     @task_group(group_id="data_export")
@@ -174,7 +193,10 @@ def champions_league_pipeline():
             'REDSHIFT_DATABASE': '{{ var.value.redshift_database }}',
             'REDSHIFT_USER': '{{ var.value.redshift_user }}'
         },
-        resources={'request_memory': '1Gi', 'limit_memory': '2Gi', 'request_cpu': '500m', 'limit_cpu': '1000m'}
+        resources={
+            'requests': {'memory': '1Gi', 'cpu': '500m'},
+            'limits': {'memory': '2Gi', 'cpu': '1000m'}
+        }
     )
     
     @task.kubernetes(
