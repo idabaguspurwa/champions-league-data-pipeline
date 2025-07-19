@@ -16,28 +16,8 @@ from airflow.providers.http.operators.http import SimpleHttpOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.models import Variable
 
-import types
-import sys
-from unittest.mock import MagicMock
-
-# Make 'airflow.providers.cncf.kubernetes' a module, not just a MagicMock
-sys.modules['airflow.providers.cncf.kubernetes'] = types.ModuleType('airflow.providers.cncf.kubernetes')
-sys.modules['airflow.providers.cncf.kubernetes.operators'] = MagicMock()
-sys.modules['airflow.providers.cncf.kubernetes.operators.pod'] = MagicMock()
-
-provider_info = {
-    "name": "Kubernetes",
-    "description": "Kubernetes provider (mocked for tests)",
-    "package-name": "apache-airflow-providers-cncf-kubernetes", 
-    "version": "0.0.0",
-}
-
-get_provider_info_mod = types.ModuleType("airflow.providers.cncf.kubernetes.get_provider_info")
-get_provider_info_mod.get_provider_info = lambda: provider_info
-
-sys.modules['airflow.providers.cncf.kubernetes.get_provider_info'] = get_provider_info_mod
-
 # --- Configuration (loaded once at the top) ---
+# It's a best practice to fetch these at parse time for tasks that don't support Jinja templating.
 NAMESPACE = Variable.get("k8s_namespace", default_var="default")
 IMAGE_PULL_POLICY = Variable.get("image_pull_policy", default_var="Always")
 AWS_REGION = Variable.get("aws_region", default_var="ap-southeast-1")
@@ -87,31 +67,9 @@ def create_kubernetes_pod_operator(
         is_delete_operator_pod=True, **kwargs
     )
 
-def dummy_kubernetes_decorator(*args, **kwargs):
-    def wrapper(f):
-        return f
-    return wrapper
-
-# Patch airflow.decorators.task.kubernetes to a dummy decorator
-def dummy_kubernetes_decorator(*args, **kwargs):
-    def wrapper(f):
-        return f
-    return wrapper
-
-# If airflow.decorators is already imported, patch its 'task' attribute
-if 'airflow.decorators' in sys.modules:
-    task_obj = getattr(sys.modules['airflow.decorators'], 'task', None)
-    if task_obj:
-        setattr(task_obj, 'kubernetes', dummy_kubernetes_decorator)
-else:
-    # If not imported, create a dummy 'task' object with 'kubernetes'
-    task_mod = types.SimpleNamespace()
-    task_mod.kubernetes = dummy_kubernetes_decorator
-    sys.modules['airflow.decorators.task'] = task_mod
-
 @dag(
     dag_id='champions_league_pipeline_v2',
-    start_date=pendulum.datetime(2025, 7, 16, tz="Asia/Jakarta"),
+    start_date=pendulum.datetime(2025, 7, 19, tz="Asia/Jakarta"),
     schedule='0 */6 * * *',  # Every 6 hours.
     catchup=False,
     max_active_runs=1,
@@ -226,7 +184,6 @@ def champions_league_pipeline():
         is_delete_operator_pod=True,
         trigger_rule='all_done'
     )
-    
     def pipeline_notification(dag_run=None):
         import boto3
         
@@ -248,6 +205,13 @@ def champions_league_pipeline():
         )
         return subject
 
-    ingestion_group() >> quality_group() >> transformation_group() >> [export_group(), load_to_redshift] >> pipeline_notification()
+    # Correctly define the dependency chain
+    ingestion = ingestion_group()
+    quality = quality_group()
+    transformation = transformation_group()
+    export = export_group()
+    notification = pipeline_notification()
+
+    ingestion >> quality >> transformation >> [export, load_to_redshift] >> notification
 
 champions_league_pipeline()
