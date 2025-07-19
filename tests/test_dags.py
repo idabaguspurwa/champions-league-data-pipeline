@@ -1,28 +1,11 @@
 import os
-import sys
-from unittest.mock import MagicMock
-
-# Mock boto3.client to prevent real AWS calls during DAG parsing/tests
-import boto3
-boto3.client = MagicMock()
-
-# Set the AIRFLOW_HOME environment variable to a temporary directory
-os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
-# Configure Airflow to use a temporary SQLite database for testing
-os.environ['AIRFLOW__CORE__SQL_ALCHEMY_CONN'] = 'sqlite:////tmp/airflow/airflow.db'
-
-# Mock the kubernetes provider before importing anything else
-sys.modules['airflow.providers.kubernetes'] = MagicMock()
-sys.modules['airflow.providers.kubernetes.operators'] = MagicMock()
-sys.modules['airflow.providers.kubernetes.operators.kubernetes_pod'] = MagicMock()
-sys.modules['airflow.providers.cncf'] = MagicMock()
-sys.modules['airflow.providers.cncf.kubernetes'] = MagicMock()
-sys.modules['airflow.providers.cncf.kubernetes.operators'] = MagicMock()
-sys.modules['airflow.providers.cncf.kubernetes.operators.kubernetes_pod'] = MagicMock()
-sys.modules['airflow.providers.cncf.kubernetes.operators.pod'] = MagicMock()
-
 import pytest
 from airflow.models.dagbag import DagBag
+
+# Set Airflow environment variables for a temporary, in-memory database
+os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
+os.environ['AIRFLOW__CORE__SQL_ALCHEMY_CONN'] = 'sqlite:////tmp/airflow/airflow.db'
+os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
 
 # Path to the DAGs folder
 DAGS_PATH = os.path.join(os.path.dirname(__file__), '..', 'airflow_dags')
@@ -38,12 +21,10 @@ def test_dag_integrity(dag_id):
     Tests for DAG integrity:
     1. No import errors.
     2. All tasks have defined owners.
-    3. No tasks have default retries (or they match a standard).
     """
     dag = DAGBAG.get_dag(dag_id)
     assert dag is not None, f"DAG '{dag_id}' could not be loaded."
-   
-    # Test for default owners
+    
     for task in dag.tasks:
         assert task.owner is not None and task.owner.lower() != 'airflow', (
             f"Task '{task.task_id}' in DAG '{dag_id}' has a missing or default owner."

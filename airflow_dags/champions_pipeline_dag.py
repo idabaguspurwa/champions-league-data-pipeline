@@ -17,7 +17,6 @@ from airflow.providers.http.sensors.http import HttpSensor
 from airflow.models import Variable
 
 # --- Configuration (loaded once at the top) ---
-# It's a best practice to fetch these at parse time for tasks that don't support Jinja templating.
 NAMESPACE = Variable.get("k8s_namespace", default_var="default")
 IMAGE_PULL_POLICY = Variable.get("image_pull_policy", default_var="Always")
 AWS_REGION = Variable.get("aws_region", default_var="ap-southeast-1")
