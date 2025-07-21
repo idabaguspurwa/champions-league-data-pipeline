@@ -76,7 +76,7 @@ variable "node_group_min_size" {
 variable "node_instance_type" {
   description = "EC2 instance type for worker nodes"
   type        = string
-  default     = "t3.medium"
+  default     = "t3.large"
 }
 
 # Local values

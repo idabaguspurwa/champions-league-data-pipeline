@@ -208,6 +208,22 @@ resource "aws_eks_addon" "vpc_cni" {
   tags = local.common_tags
 }
 
+# Add this to eks.tf
+resource "aws_eks_addon" "ebs_csi_driver" {
+  cluster_name = aws_eks_cluster.main.name
+  addon_name   = "aws-ebs-csi-driver"
+  
+  depends_on = [
+    aws_eks_node_group.main
+  ]
+}
+
+# Also add IAM policy for EBS CSI driver
+resource "aws_iam_role_policy_attachment" "ebs_csi_driver_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+  role       = aws_iam_role.eks_node_role.name
+}
+
 resource "aws_eks_addon" "coredns" {
   cluster_name                = aws_eks_cluster.main.name
   addon_name                  = "coredns"
