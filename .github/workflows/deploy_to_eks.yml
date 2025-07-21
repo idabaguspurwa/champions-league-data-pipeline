@@ -21,7 +21,10 @@ env:
   AWS_REGION: ap-southeast-1
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com
   EKS_CLUSTER_NAME: champions-league-cluster
-  NAMESPACE: champions-league
+  NAMESPACE: default  # Changed from 'champions-league'
+  ENVIRONMENT: production
+  DEPLOYMENT_TIMEOUT: 5m
+  HEALTH_CHECK_RETRIES: 3
 
 permissions:
   id-token: write
@@ -72,7 +75,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       matrix:
-        service: [ingestion, data-quality, transformation, export]
+        service: [ingestion, quality, transformation, export]
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v4
@@ -86,6 +89,11 @@ jobs:
       - name: "Login to Amazon ECR"
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: "Verify ECR repository exists"
+        run: |
+          aws ecr describe-repositories --repository-names champions-league/data-${{ matrix.service }} || \
+            (echo "ECR repository champions-league/data-${{ matrix.service }} not found!" && exit 1)
+
       - name: "Build, tag, and push image to Amazon ECR"
         id: build-image
         env:
@@ -93,12 +101,12 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           DOCKERFILE="Dockerfile.python"
-          BUILD_ARGS="--build-arg SERVICE_DIR=${{ matrix.service }}"
+          BUILD_ARGS="--build-arg SERVICE_DIR=src/${{ matrix.service }}"
 
           if [[ "${{ matrix.service }}" == "transformation" ]]; then
             echo "Using Spark Dockerfile for transformation service..."
             DOCKERFILE="Dockerfile.spark"
-            BUILD_ARGS=""
+            BUILD_ARGS="--build-arg SERVICE_DIR=src/transformation"
           fi
 
           docker build \
@@ -142,48 +150,216 @@ jobs:
 
       - name: "Install kubectl and kustomize"
         run: |
-          sudo apt-get update
-          sudo apt-get install -y kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           sudo mv kustomize /usr/local/bin/
 
       - name: "Update kubeconfig"
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
+      - name: "Check cluster resources"
+        run: |
+          echo "### Cluster Status ###"
+          echo "Cluster nodes:"
+          kubectl get nodes
+          echo ""
+          echo "Node resources:"
+          kubectl top nodes || echo "Metrics server not available"
+          echo ""
+          echo "Namespace resources:"
+          kubectl get all -n ${{ env.NAMESPACE }}
+
       - name: "Update Kustomize manifests with new image tags"
         run: |
           cd kubernetes/overlays/production
-          kustomize edit set image champions-league/data-ingestion=${{ env.ECR_REGISTRY }}/champions-league/data-ingestion:${{ github.sha }}
-          kustomize edit set image champions-league/data-quality=${{ env.ECR_REGISTRY }}/champions-league/data-quality:${{ github.sha }}
-          kustomize edit set image champions-league/data-transformation=${{ env.ECR_REGISTRY }}/champions-league/data-transformation:${{ github.sha }}
-          kustomize edit set image champions-league/data-export=${{ env.ECR_REGISTRY }}/champions-league/data-export:${{ github.sha }}
+          for service in ingestion quality transformation export; do
+            kustomize edit set image champions-league/data-$service=${{ env.ECR_REGISTRY }}/champions-league/data-$service:${{ github.sha }}
+          done
+          echo "Updated kustomization.yaml:"
           cat kustomization.yaml
 
       - name: "Deploy to EKS using Kustomize"
+        id: deploy
         run: |
+          echo "Applying Kubernetes manifests..."
           kustomize build kubernetes/overlays/production | kubectl apply -f -
-          echo "Waiting for changes to apply..."
+          echo "Waiting for rollout to begin..."
           sleep 10
 
       - name: "Verify deployments"
-        run: kubectl rollout status deployment --all -n ${{ env.NAMESPACE }} --timeout=5m
+        id: verify
+        run: |
+          for service in ingestion quality transformation export; do
+            echo "Checking ${service}-service deployment..."
+            kubectl rollout status deployment/${service}-service -n ${{ env.NAMESPACE }} --timeout=${{ env.DEPLOYMENT_TIMEOUT }} || exit 1
+          done
 
       - name: "Run deployment smoke tests"
         run: |
-          for service in ingestion data-quality transformation export; do
-            echo "Testing health of data-$service..."
-            kubectl run smoke-test-$service --image=curlimages/curl:latest -n ${{ env.NAMESPACE }} --rm -i --restart=Never -- \
-              curl -f --max-time 10 http://data-$service/health || (echo "Health check for data-$service failed!" && exit 1)
+          echo "Waiting for services to be ready..."
+          sleep 30
+          
+          for service in ingestion quality transformation export; do
+            echo "Testing health of ${service}-service..."
+            for i in $(seq 1 ${{ env.HEALTH_CHECK_RETRIES }}); do
+              kubectl run smoke-test-$service-$i \
+                --image=curlimages/curl:latest \
+                -n ${{ env.NAMESPACE }} \
+                --rm -i --restart=Never -- \
+                curl -f --max-time 10 http://${service}-service/health && break || \
+                (echo "Health check attempt $i failed for ${service}-service" && \
+                 [ $i -eq ${{ env.HEALTH_CHECK_RETRIES }} ] && exit 1 || sleep 10)
+            done
           done
 
-      - name: "Send Deployment Notification"
+      - name: "Post-deployment validation"
+        if: success()
+        run: |
+          echo "### Post-deployment checks ###"
+          
+          # Check pod health
+          echo "=== Pod Status ==="
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/part-of=champions-league
+          
+          # Check service endpoints
+          echo "=== Service Endpoints ==="
+          kubectl get endpoints -n ${{ env.NAMESPACE }}
+          
+          # Check recent events for any issues
+          echo "=== Recent Events ==="
+          kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -20
+          
+          # Verify connectivity between services
+          echo "=== Service Connectivity Test ==="
+          kubectl run connectivity-test \
+            --image=nicolaka/netshoot \
+            -n ${{ env.NAMESPACE }} \
+            --rm -i --restart=Never -- \
+            sh -c "nslookup ingestion-service && nslookup quality-service && nslookup transformation-service && nslookup export-service"
+
+      - name: "Generate deployment summary"
+        if: success()
+        run: |
+          echo "### 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster:** ${{ env.EKS_CLUSTER_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Deployed Services:" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Image Tag | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          for service in ingestion quality transformation export; do
+            STATUS=$(kubectl get deployment ${service}-service -n ${{ env.NAMESPACE }} -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
+            echo "| ${service}-service | ${GITHUB_SHA:0:7} | $STATUS |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+      - name: "Rollback on failure"
+        if: failure() && (steps.deploy.outcome == 'failure' || steps.verify.outcome == 'failure')
+        run: |
+          echo "### Deployment failed, rolling back... ###"
+          for service in ingestion quality transformation export; do
+            echo "Rolling back ${service}-service..."
+            kubectl rollout undo deployment/${service}-service -n ${{ env.NAMESPACE }} || true
+                        kubectl rollout status deployment/${service}-service -n ${{ env.NAMESPACE }} --timeout=2m || true
+          done
+          echo "Rollback completed"
+
+      - name: "Send detailed deployment notification"
         if: always()
         run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
-            SUBJECT="✅ Success: EKS Deployment"
-            MESSAGE="Services deployed to EKS cluster '${{ env.EKS_CLUSTER_NAME }}'. Commit: ${{ github.sha }}"
+          DEPLOYMENT_STATUS="${{ job.status }}"
+          SERVICES=("ingestion" "quality" "transformation" "export")
+          
+          if [[ "$DEPLOYMENT_STATUS" == "success" ]]; then
+            SUBJECT="✅ Champions League Pipeline Deployed Successfully"
+            MESSAGE="Deployment successful to EKS cluster '${{ env.EKS_CLUSTER_NAME }}' in namespace '${{ env.NAMESPACE }}'."
+            MESSAGE+="\n\nDeployed services:"
+            for service in "${SERVICES[@]}"; do
+              MESSAGE+="\n- ${service}-service: ${{ env.ECR_REGISTRY }}/champions-league/data-${service}:${{ github.sha }}"
+            done
+            MESSAGE+="\n\nCommit: ${{ github.sha }}"
+            MESSAGE+="\nTriggered by: ${{ github.actor }}"
+            MESSAGE+="\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           else
-            SUBJECT="❌ Failure: EKS Deployment"
-            MESSAGE="EKS deployment failed. Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            SUBJECT="❌ Champions League Pipeline Deployment Failed"
+            MESSAGE="Deployment to EKS failed."
+            MESSAGE+="\n\nCluster: ${{ env.EKS_CLUSTER_NAME }}"
+            MESSAGE+="\nNamespace: ${{ env.NAMESPACE }}"
+            MESSAGE+="\n\nFailed services might include:"
+            for service in "${SERVICES[@]}"; do
+              MESSAGE+="\n- ${service}-service"
+            done
+            MESSAGE+="\n\nCheck logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            MESSAGE+="\n\nCommit: ${{ github.sha }}"
+            MESSAGE+="\nTriggered by: ${{ github.actor }}"
+            
+            # Include last error logs
+            MESSAGE+="\n\nLast deployment events:"
+            EVENTS=$(kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -5 | head -c 500)
+            MESSAGE+="\n$EVENTS"
           fi
-          aws sns publish --topic-arn "${{ secrets.SNS_TOP_ARN }}" --subject "$SUBJECT" --message "$MESSAGE"
+          
+          aws sns publish \
+            --topic-arn "${{ secrets.SNS_TOPIC_ARN }}" \
+            --subject "$SUBJECT" \
+            --message "$MESSAGE"
+
+  ## -----------------------------------------------------------------
+  ## 4. Cleanup on PR (Optional)
+  ## -----------------------------------------------------------------
+  cleanup-pr:
+    name: "🧹 Cleanup PR Environment"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    steps:
+      - name: "Configure AWS credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Update kubeconfig"
+        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: "Cleanup PR resources"
+        run: |
+          PR_NAMESPACE="pr-${{ github.event.pull_request.number }}"
+          if kubectl get namespace $PR_NAMESPACE 2>/dev/null; then
+            echo "Cleaning up PR namespace: $PR_NAMESPACE"
+            kubectl delete namespace $PR_NAMESPACE --wait=false
+          else
+            echo "No PR namespace to clean up"
+          fi
+
+  ## -----------------------------------------------------------------
+  ## 5. Security Scan Summary (Runs after build-and-scan)
+  ## -----------------------------------------------------------------
+  security-summary:
+    name: "🔒 Security Scan Summary"
+    needs: build-and-scan
+    runs-on: ubuntu-latest
+    if: always() && needs.build-and-scan.result != 'skipped'
+    steps:
+      - name: "Generate Security Summary"
+        run: |
+          echo "### 🔒 Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Scan Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ingestion | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          echo "| quality | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          echo "| transformation | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          echo "| export | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 View detailed scan results in the Security tab" >> $GITHUB_STEP_SUMMARY

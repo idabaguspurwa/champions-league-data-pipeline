@@ -1,0 +1,35 @@
+name: Validate Airflow DAGs
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'airflow_dags/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'airflow_dags/**'
+
+jobs:
+  validate:
+    name: "Validate DAGs"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          pip install apache-airflow==2.7.1
+          
+      - name: Validate DAG syntax
+        run: |
+          export AIRFLOW_HOME=$(pwd)/temp_airflow
+          airflow db init
+          python -m py_compile airflow_dags/*.py
+          airflow dags list

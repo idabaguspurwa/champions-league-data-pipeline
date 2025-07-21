@@ -1,0 +1,228 @@
+name: Build and Push CI Docker Image
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docker/Dockerfile.ci'
+      - 'requirements.txt'
+      - 'requirements-dev.txt'
+      - '.github/workflows/build_ci_image.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docker/Dockerfile.ci'
+      - 'requirements.txt'
+      - 'requirements-dev.txt'
+      - '.github/workflows/build_ci_image.yml'
+  schedule:
+    # Rebuild weekly to get security updates
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if no changes'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: champions-league/ci-base
+  DOCKER_BUILDKIT: 1
+  BUILDKIT_PROGRESS: plain
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+
+jobs:
+  build-and-push-ci:
+    name: "🐳 Build CI Image"
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.build-image.outputs.image_uri }}
+      image_digest: ${{ steps.build-image.outputs.image_digest }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v4
+
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: "Configure AWS credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "Login to Amazon ECR"
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: "Check if ECR repository exists"
+        run: |
+          aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY }} || \
+            aws ecr create-repository --repository-name ${{ env.ECR_REPOSITORY }} \
+              --image-scanning-configuration scanOnPush=true \
+              --encryption-configuration encryptionType=AES256
+
+      - name: "Generate cache metadata"
+        id: cache-meta
+        run: |
+          # Generate cache key based on requirements files
+          CACHE_KEY="${{ runner.os }}-ci-buildx-$(sha256sum requirements*.txt | sha256sum | cut -d' ' -f1)"
+          echo "cache_key=$CACHE_KEY" >> "$GITHUB_OUTPUT"
+          
+          # Generate build metadata
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
+
+      - name: "Build and push CI image"
+        id: build-image
+        uses: docker/build-push-action@v5
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        with:
+          context: .
+          file: docker/Dockerfile.ci
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:build-${{ github.run_number }}
+          cache-from: type=gha,scope=ci-image
+          cache-to: type=gha,mode=max,scope=ci-image
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+            BUILD_DATE=${{ steps.cache-meta.outputs.build_date }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.run_number }}
+          labels: |
+            org.opencontainers.image.title=Champions League CI Base
+            org.opencontainers.image.description=CI base image for Champions League data pipeline
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.cache-meta.outputs.build_date }}
+            maintainer=${{ github.repository_owner }}
+          outputs: |
+            type=image,name=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+
+      - name: "Export digest"
+        id: export-digest
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          DIGEST=$(docker buildx imagetools inspect $IMAGE_URI --format "{{.Digest}}")
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: "Run Trivy vulnerability scanner"
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.export-digest.outputs.image_uri }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          timeout: '10m'
+
+      - name: "Upload Trivy scan results"
+        if: github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'ci-base-image'
+
+      - name: "Test CI image"
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Testing CI image..."
+          docker run --rm ${{ steps.export-digest.outputs.image_uri }} python --version
+          docker run --rm ${{ steps.export-digest.outputs.image_uri }} pip list
+          docker run --rm ${{ steps.export-digest.outputs.image_uri }} airflow version
+
+      - name: "Clean up old images"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          # Keep only the last 10 images
+          IMAGES=$(aws ecr describe-images --repository-name ${{ env.ECR_REPOSITORY }} \
+            --query 'sort_by(imageDetails,& imagePushedAt)[:-10].imageDigest' \
+            --output json | jq -r '.[]')
+          
+          if [ ! -z "$IMAGES" ]; then
+            echo "Cleaning up old images..."
+            for digest in $IMAGES; do
+              aws ecr batch-delete-image --repository-name ${{ env.ECR_REPOSITORY }} \
+                --image-ids imageDigest=$digest
+            done
+          fi
+
+      - name: "Generate build summary"
+        if: always()
+        run: |
+          echo "### 🐳 CI Image Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Number:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ job.status }}" == "success" && "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "**Image URI:** \`${{ steps.export-digest.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Image Digest:** \`${{ steps.export-digest.outputs.image_digest }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+            echo "- \`latest\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`build-${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+  update-workflows:
+    name: "📝 Update Workflows"
+    needs: build-and-push-ci
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: "Create issue if other workflows need updating"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🔄 CI Image Updated - Review Dependent Workflows';
+            const body = `The CI base image has been updated with new dependencies.
+            
+            **New Image:** \`${{ needs.build-and-push-ci.outputs.image_uri }}\`
+            **Digest:** \`${{ needs.build-and-push-ci.outputs.image_digest }}\`
+            
+            Please review and test the following workflows that depend on this image:
+            - [ ] deploy_to_eks.yml
+            - [ ] Any other workflows using the CI image
+            
+            Make sure all tests pass with the new image before closing this issue.
+            
+            /cc @${{ github.actor }}`;
+            
+            // Check if similar issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ci-image-update'
+            });
+            
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['ci-image-update', 'automation']
+              });
+            }
