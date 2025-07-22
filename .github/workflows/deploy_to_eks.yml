@@ -213,8 +213,7 @@ jobs:
           # Update kubeconfig
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name ${{ env.EKS_CLUSTER_NAME }} \
-            --role-arn ${{ secrets.AWS_IAM_ROLE_ARN }}
+            --name ${{ env.EKS_CLUSTER_NAME }}
           
           # Verify the configuration
           kubectl config current-context
