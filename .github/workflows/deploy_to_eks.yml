@@ -75,7 +75,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       matrix:
-        service: [ingestion, quality, transformation, export]
+        service: [ingestion, data_quality, transformations, export]
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v4
@@ -109,17 +109,31 @@ jobs:
       - name: "Build, tag, and push image to Amazon ECR"
         id: build-image
         env:
-          ECR_REPOSITORY: champions-league/data-${{ matrix.service }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          DOCKERFILE="Dockerfile.python"
-          BUILD_ARGS="--build-arg SERVICE_DIR=src/${{ matrix.service }}"
+          # Map directory names to ECR Repository names
+          case "${{ matrix.service }}" in
+            "data_quality")
+              ECR_REPOSITORY="champions-league/data-quality"
+              ;;
+            "transformations")
+              ECR_REPOSITORY="champions-league/data-transformation"
+              ;;
+            *)
+              ECR_REPOSITORY="champions-league/data-${{ matrix.service }}"
+              ;;
+          esac
 
-          if [[ "${{ matrix.service }}" == "transformation" ]]; then
+          DOCKERFILE="Dockerfile.python"
+          BUILD_ARGS="--build-arg SERVICE_DIR=${{ matrix.service }}"
+
+          if [[ "${{ matrix.service }}" == "transformations" ]]; then
             echo "Using Spark Dockerfile for transformation service..."
             DOCKERFILE="Dockerfile.spark"
-            BUILD_ARGS="--build-arg SERVICE_DIR=transformation"
           fi
+
+          echo "Building ${{ matrix.service }} from src/${{ matrix.service }}"
+          echo "ECR Repository: $ECR_REPOSITORY"
 
           docker build \
             $BUILD_ARGS \
