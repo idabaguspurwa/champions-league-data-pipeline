@@ -1,12 +1,15 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: data-transformation-bronze-to-silver
+  # Use generateName to create a new, unique Job on each run
+  generateName: data-transformation-bronze-to-silver-
   namespace: champions-league
   labels:
     app: data-transformation
     layer: bronze-to-silver
 spec:
+  # Add a TTL to automatically clean up the Job after it completes (e.g., 1 hour)
+  ttlSecondsAfterFinished: 3600
   template:
     metadata:
       labels:
@@ -40,6 +43,7 @@ spec:
         volumeMounts:
         - name: spark-config
           mountPath: /app/spark-config
+      # Corrected indentation for the fields below
       volumes:
       - name: spark-config
         configMap:
@@ -51,12 +55,15 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: data-transformation-silver-to-gold
+  # Use generateName to create a new, unique Job on each run
+  generateName: data-transformation-silver-to-gold-
   namespace: champions-league
   labels:
     app: data-transformation
     layer: silver-to-gold
 spec:
+  # Add a TTL to automatically clean up the Job after it completes (e.g., 1 hour)
+  ttlSecondsAfterFinished: 3600
   template:
     metadata:
       labels:
@@ -90,6 +97,7 @@ spec:
         volumeMounts:
         - name: spark-config
           mountPath: /app/spark-config
+      # Corrected indentation for the fields below
       volumes:
       - name: spark-config
         configMap:
