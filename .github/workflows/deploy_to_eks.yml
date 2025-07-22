@@ -253,6 +253,14 @@ jobs:
           done
           echo "Updated kustomization.yaml:"
           cat kustomization.yaml
+      
+      - name: "Delete Existing Transformation Jobs"
+        run: |
+          kubectl delete job \
+            data-transformation-bronze-to-silver \
+            data-transformation-silver-to-gold \
+            -n ${{ env.NAMESPACE }} \
+            --ignore-not-found=true
 
       - name: "Deploy to EKS using Kustomize"
         id: deploy
