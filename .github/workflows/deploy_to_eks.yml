@@ -270,12 +270,34 @@ jobs:
           echo "Waiting for rollout to begin..."
           sleep 10
 
-      - name: "Verify deployments"
+      - name: "Verify Deployments"
         id: verify
         run: |
           for service in data-ingestion-service data-quality-service; do
             echo "Checking ${service} deployment..."
-            kubectl rollout status deployment/${service} -n ${{ env.NAMESPACE }} --timeout=${{ env.DEPLOYMENT_TIMEOUT }} || exit 1
+
+            # Try to get rollout status. If it fails, run debug commands.
+            kubectl rollout status deployment/${service} -n ${{ env.NAMESPACE }} --timeout=${{ env.DEPLOYMENT_TIMEOUT }} || \
+            (
+              echo "::error::Rollout failed for ${service}. Dumping debug info."
+
+              echo "--- DESCRIBING DEPLOYMENT ---"
+              kubectl describe deployment ${service} -n ${{ env.NAMESPACE }}
+
+              echo "--- DESCRIBING PODS ---"
+              # Get the names of the pods for this deployment
+              POD_NAMES=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=${service} -o jsonpath='{.items[*].metadata.name}')
+              for POD_NAME in $POD_NAMES; do
+                echo "Describing pod: $POD_NAME"
+                kubectl describe pod $POD_NAME -n ${{ env.NAMESPACE }}
+              done
+
+              echo "--- LOGS FROM PODS ---"
+              kubectl logs deployment/${service} -n ${{ env.NAMESPACE }} --all-containers=true --tail=100
+
+              # Exit with a error code to fail the workflow
+              exit 1
+            )
           done
 
       - name: "Run deployment smoke tests"
