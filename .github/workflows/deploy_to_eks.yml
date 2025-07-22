@@ -226,8 +226,10 @@ jobs:
           echo "### Cluster Status ###"
           
           # Test with simple command
-          kubectl version --short
+          echo "kubectl version:"
+          kubectl version --client=true
 
+          echo ""
           echo "Cluster nodes:"
           kubectl get nodes || echo "Failed to get nodes"
 
@@ -238,6 +240,10 @@ jobs:
           echo ""
           echo "Services in default namespace:"
           kubectl get services -n ${{ env.NAMESPACE }} || echo "No services found"
+
+          echo ""
+          echo "All pods in default namespace:"
+          kubectl get pods -n ${{ env.NAMESPACE }} || echo "No pods found"
 
       - name: "Update Kustomize manifests with new image tags"
         run: |
