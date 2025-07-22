@@ -2,10 +2,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+namespace: champions-league
+
 # Point to the base configuration
 resources:
   - ../../base
-  
+
 images:
   - name: champions-league/data-ingestion
     newName: ${{ env.ECR_REGISTRY }}/champions-league/data-ingestion
