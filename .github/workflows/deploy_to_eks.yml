@@ -21,7 +21,7 @@ env:
   AWS_REGION: ap-southeast-1
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com
   EKS_CLUSTER_NAME: champions-league-cluster
-  NAMESPACE: default  # Changed from 'champions-league'
+  NAMESPACE: default  
   ENVIRONMENT: production
   DEPLOYMENT_TIMEOUT: 5m
   HEALTH_CHECK_RETRIES: 3
@@ -118,7 +118,7 @@ jobs:
           if [[ "${{ matrix.service }}" == "transformation" ]]; then
             echo "Using Spark Dockerfile for transformation service..."
             DOCKERFILE="Dockerfile.spark"
-            BUILD_ARGS="--build-arg SERVICE_DIR=src/transformation"
+            BUILD_ARGS="--build-arg SERVICE_DIR=transformation"
           fi
 
           docker build \
