@@ -258,7 +258,7 @@ jobs:
         id: deploy
         run: |
           echo "Applying Kubernetes manifests..."
-          kustomize build kubernetes/overlays/production | kubectl apply -f -
+          kubectl apply -k kubernetes/overlays/production
           echo "Waiting for rollout to begin..."
           sleep 10
 

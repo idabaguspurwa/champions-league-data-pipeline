@@ -1,14 +1,21 @@
+# kubernetes/overlays/production/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: champions-league
-bases:
+
+# Point to the base configuration
+resources:
   - ../../base
+  
 images:
   - name: champions-league/data-ingestion
-    newTag: placeholder
+    newName: ${{ env.ECR_REGISTRY }}/champions-league/data-ingestion
+    newTag: placeholder # This tag will be replaced by the github.sha
   - name: champions-league/data-quality
+    newName: ${{ env.ECR_REGISTRY }}/champions-league/data-quality
     newTag: placeholder
   - name: champions-league/data-transformation
+    newName: ${{ env.ECR_REGISTRY }}/champions-league/data-transformation
     newTag: placeholder
   - name: champions-league/data-export
+    newName: ${{ env.ECR_REGISTRY }}/champions-league/data-export
     newTag: placeholder

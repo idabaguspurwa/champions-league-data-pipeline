@@ -1,8 +1,11 @@
+# kubernetes/base/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 resources:
-  - configmaps/
-  - deployments/
-  - jobs/
-  - secrets/
-  - services/
+  - configmaps/configmaps.yaml
+  - deployments/data-ingestion-deployment.yaml
+  - deployments/data-quality-deployment.yaml
+  - jobs/transformation-jobs.yaml
+  - secrets/api-credentials.yaml
+  - services/services.yaml
