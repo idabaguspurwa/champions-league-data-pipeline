@@ -91,8 +91,20 @@ jobs:
 
       - name: "Verify ECR repository exists"
         run: |
-          aws ecr describe-repositories --repository-names champions-league/data-${{ matrix.service }} || \
-            (echo "ECR repository champions-league/data-${{ matrix.service }} not found!" && exit 1)
+          REPO_NAME="champions-league/data-${{ matrix.service }}"
+          echo "Checking repository: $REPO_NAME"
+
+          # Check if repository exists and capture the result
+          if aws ecr describe-repositories --repository-names $REPO_NAME --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            echo "✅ Repository $REPO_NAME exists"
+
+            # List existing images (if any)
+            echo "Existing images in $REPO_NAME:"
+            aws ecr list-images --repository-name $REPO_NAME --region ${{ env.AWS_REGION }} --query 'imageIds[*].imageTag' --output table || echo "No images found"
+          else
+            echo "❌ Repository $REPO_NAME not found!"
+            exit 1
+          fi
 
       - name: "Build, tag, and push image to Amazon ECR"
         id: build-image
