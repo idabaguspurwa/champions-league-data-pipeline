@@ -273,9 +273,9 @@ jobs:
       - name: "Verify deployments"
         id: verify
         run: |
-          for service in ingestion quality transformation export; do
-            echo "Checking ${service}-service deployment..."
-            kubectl rollout status deployment/${service}-service -n ${{ env.NAMESPACE }} --timeout=${{ env.DEPLOYMENT_TIMEOUT }} || exit 1
+          for service in data-ingestion-service data-quality-service; do
+            echo "Checking ${service} deployment..."
+            kubectl rollout status deployment/${service} -n ${{ env.NAMESPACE }} --timeout=${{ env.DEPLOYMENT_TIMEOUT }} || exit 1
           done
 
       - name: "Run deployment smoke tests"
