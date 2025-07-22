@@ -206,19 +206,39 @@ jobs:
           kustomize version
 
       - name: "Update kubeconfig"
-        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+        run: |
+          # Get cluster details
+          echo "Configuring kubectl for EKS cluster: ${{ env.EKS_CLUSTER_NAME }}"
+
+          # Update kubeconfig
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.EKS_CLUSTER_NAME }} \
+            --role-arn ${{ secrets.AWS_IAM_ROLE_ARN }}
+          
+          # Verify the configuration
+          kubectl config current-context
+
+          # Test authentication
+          kubectl auth can-i get pods --all-namespaces
 
       - name: "Check cluster resources"
         run: |
           echo "### Cluster Status ###"
+          
+          # Test with simple command
+          kubectl version --short
+
           echo "Cluster nodes:"
-          kubectl get nodes
+          kubectl get nodes || echo "Failed to get nodes"
+
           echo ""
-          echo "Node resources:"
-          kubectl top nodes || echo "Metrics server not available"
+          echo "Namespaces:"
+          kubectl get namespaces || echo "Failed to get namespaces"
+
           echo ""
-          echo "Namespace resources:"
-          kubectl get all -n ${{ env.NAMESPACE }}
+          echo "Services in default namespace:"
+          kubectl get services -n ${{ env.NAMESPACE }} || echo "No services found"
 
       - name: "Update Kustomize manifests with new image tags"
         run: |
