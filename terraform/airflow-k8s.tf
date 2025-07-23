@@ -79,9 +79,18 @@ resource "random_password" "airflow_admin" {
 }
 
 # Track existing Airflow deployment
-data "helm_release" "airflow" {
-  name      = "airflow"
-  namespace = "airflow"
+resource "helm_release" "airflow" {
+  name       = "airflow"
+  namespace  = "airflow"
+  
+  repository = "https://airflow.apache.org"
+  chart      = "airflow"
+  version    = "1.11.0"
+
+  # You might also need to specify custom values
+  # values = [
+  #   "${file("path/to/your/airflow-values.yaml")}"
+  # ]
 }
 
 # Create Kubernetes secret for connections
