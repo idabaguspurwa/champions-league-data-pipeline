@@ -254,6 +254,15 @@ jobs:
           echo "Updated kustomization.yaml:"
           cat kustomization.yaml
       
+      - name: "Pre-flight Check: Verify Configs and Secrets"
+        run: |
+          echo "--- Checking for required ConfigMaps and Secrets ---"
+          kubectl get configmap ingestion-config -n ${{ env.NAMESPACE }} || \
+            echo "::error::ConfigMap 'ingestion-config' not found."
+          
+          kubectl get secret api-credentials -n ${{ env.NAMESPACE }} || \
+            echo "::error::Secret 'api-credentials' not found."
+      
       - name: "Delete Existing Transformation Jobs"
         run: |
           kubectl delete job \
