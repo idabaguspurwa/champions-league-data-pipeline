@@ -282,7 +282,7 @@ jobs:
           echo "Waiting for rollout to begin..."
           sleep 10
 
-      - name: "Verify Deployments and Debug on Failure"
+      - name: "Verify Deployments"
         id: verify
         run: |
           for service in data-ingestion-service data-quality-service; do
