@@ -289,22 +289,24 @@ jobs:
             echo "Verifying deployment: ${service}..."
           
             # Try to get rollout status. If it fails, run debug commands.
-            kubectl rollout status deployment/${service} -n ${{ env.NAMESPACE }} --timeout=5m || \
+            kubectl rollout status deployment/${service} -n ${{ env.NAMESPACE }} --timeout=3m || \
             (
               echo "::error::Rollout failed for ${service}. Dumping debug info."
             
-              echo "--- DESCRIBING DEPLOYMENT ---"
-              kubectl describe deployment ${service} -n ${{ env.NAMESPACE }}
-
-              echo "--- DESCRIBING THE FAILING REPLICASET ---"
-              # Get the name of the newest (failing) ReplicaSet for this deployment
-              NEW_RS=$(kubectl get rs -n ${{ env.NAMESPACE }} -l app=${service} -o json | jq -r '.items | sort_by(.metadata.creationTimestamp) | .[-1].metadata.name')
+              echo "--- GETTING NEW POD NAME ---"
+              # Get the name of a pod from the newest, failing ReplicaSet
+              POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} --selector=app=${service} --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
             
-              if [[ -n "$NEW_RS" ]]; then
-                echo "Describing newest ReplicaSet: $NEW_RS"
-                kubectl describe rs $NEW_RS -n ${{ env.NAMESPACE }}
+              if [[ -n "$POD_NAME" ]]; then
+                echo "Found pod: $POD_NAME"
+
+                echo "--- DESCRIBING FAILED POD ---"
+                kubectl describe pod $POD_NAME -n ${{ env.NAMESPACE }}
+
+                echo "--- LOGS FROM FAILED POD ---"
+                kubectl logs $POD_NAME -n ${{ env.NAMESPACE }} --all-containers=true --tail=200
               else
-                echo "Could not find a ReplicaSet for the service."
+                echo "::warning::Could not find any pods for service ${service} to describe."
               fi
             
               # Exit with an error code to fail the workflow
