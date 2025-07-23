@@ -4,6 +4,7 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
+  - service-accounts.yaml
   - configmaps/configmaps.yaml
   - deployments/data-ingestion-deployment.yaml
   - deployments/data-quality-deployment.yaml
