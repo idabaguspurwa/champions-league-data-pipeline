@@ -41,7 +41,7 @@ resource "aws_iam_role" "airflow_irsa" {
       }
       Condition = {
         StringLike = {
-          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub": "system:serviceaccount:airflow:airflow-*"
+          "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub" : "system:serviceaccount:airflow:airflow-*"
         }
       }
     }]
@@ -78,11 +78,11 @@ resource "random_password" "airflow_admin" {
   special = false
 }
 
-# Track existing Airflow deployment
+# Manage the Airflow Helm deployment
 resource "helm_release" "airflow" {
   name       = "airflow"
   namespace  = "airflow"
-  
+
   repository = "https://airflow.apache.org"
   chart      = "airflow"
   version    = "1.11.0"
@@ -119,12 +119,12 @@ resource "kubernetes_service" "airflow_webui_lb" {
 
   spec {
     type = "LoadBalancer"
-    
+
     selector = {
-      component = "api-server"
+      component = "webserver" # Correct selector for Airflow webserver
       release   = "airflow"
     }
-    
+
     port {
       protocol    = "TCP"
       port        = 80
@@ -132,7 +132,8 @@ resource "kubernetes_service" "airflow_webui_lb" {
     }
   }
 
-  depends_on = [data.helm_release.airflow]
+  # FIX: Changed from data.helm_release to resource.helm_release
+  depends_on = [helm_release.airflow]
 }
 
 # Get the LoadBalancer service
@@ -147,15 +148,16 @@ data "kubernetes_service" "airflow_webui_lb" {
 
 # Outputs
 output "airflow_namespace" {
-  value = kubernetes_namespace.airflow.metadata[0].name
+  value       = kubernetes_namespace.airflow.metadata[0].name
   description = "Kubernetes namespace for Airflow"
 }
 
 output "airflow_status" {
   value = {
-    deployed    = data.helm_release.airflow.status == "deployed"
-    version     = data.helm_release.airflow.version
-    app_version = data.helm_release.airflow.app_version
+    # FIX: Changed all references from data.helm_release to helm_release
+    deployed    = helm_release.airflow.status == "deployed"
+    version     = helm_release.airflow.version
+    app_version = helm_release.airflow.app_version
   }
   description = "Airflow deployment status"
 }
@@ -171,11 +173,11 @@ output "airflow_loadbalancer_url" {
 
 output "airflow_commands" {
   value = {
-    check_pods   = "kubectl get pods -n airflow"
-    check_svc    = "kubectl get svc -n airflow"
-    logs         = "kubectl logs -n airflow -l component=scheduler"
-    git_sync_logs = "kubectl logs -n airflow -l component=scheduler -c git-sync"
-    restart_scheduler = "kubectl rollout restart statefulset airflow-scheduler -n airflow"
+    check_pods          = "kubectl get pods -n airflow"
+    check_svc           = "kubectl get svc -n airflow"
+    logs                = "kubectl logs -n airflow -l component=scheduler"
+    git_sync_logs       = "kubectl logs -n airflow -l component=scheduler -c git-sync"
+    restart_scheduler   = "kubectl rollout restart statefulset airflow-scheduler -n airflow"
     restart_dag_processor = "kubectl rollout restart deployment airflow-dag-processor -n airflow"
   }
   description = "Useful commands for Airflow management"
@@ -184,23 +186,23 @@ output "airflow_commands" {
 output "airflow_credentials" {
   value = {
     username = "admin"
-    password = "admin123"
+    password = "admin" # Default password for the chart
   }
-  sensitive = true
+  sensitive   = true
   description = "Airflow login credentials"
 }
 
 output "git_sync_config" {
   value = {
-    repository = "https://github.com/idabaguspurwa/champions-league-data-pipeline.git"
-    branch     = "main"
-    dags_path  = "airflow_dags"
+    repository    = "https://github.com/idabaguspurwa/champions-league-data-pipeline.git"
+    branch        = "main"
+    dags_path     = "airflow_dags"
     sync_interval = "60 seconds"
   }
   description = "Git-sync configuration for DAGs"
 }
 
 output "airflow_irsa_role_arn" {
-  value = aws_iam_role.airflow_irsa.arn
+  value       = aws_iam_role.airflow_irsa.arn
   description = "IAM role ARN for Airflow service account"
 }
