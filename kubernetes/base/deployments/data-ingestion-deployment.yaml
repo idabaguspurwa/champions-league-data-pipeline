@@ -76,8 +76,8 @@ spec:
           httpGet:
             path: /ready
             port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
+          initialDelaySeconds: 30
+          periodSeconds: 10
         volumeMounts:
         - name: config-volume
           mountPath: /app/config
