@@ -157,7 +157,6 @@ output "airflow_status" {
     # FIX: Changed all references from data.helm_release to helm_release
     deployed    = helm_release.airflow.status == "deployed"
     version     = helm_release.airflow.version
-    app_version = helm_release.airflow.app_version
   }
   description = "Airflow deployment status"
 }
